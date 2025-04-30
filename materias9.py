@@ -303,7 +303,7 @@ def main():
     # Mostrar logo UNAM en la barra lateral
     st.sidebar.image("unam.svg", width=150)
     
-    st.title("🎓 Notificaciones a Estudiantes")
+    st.title("🎓 Notificaciones")
     
     modo = st.sidebar.radio(
         "Modo de operación",
@@ -313,7 +313,7 @@ def main():
     )
     
     if modo == "Estudiante":
-        st.header("📝 Registro del Estudiante")
+        st.header("📝 Registro Estudiante")
         
         with st.form("form_registro", border=True):
             nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez")
@@ -338,7 +338,7 @@ def main():
                     st.balloons()
     
     elif modo == "Profesor":
-        st.header("🔒 Acceso de Profesor")
+        st.header("🔒 Acceso del Profesor")
         
         # Verificación de contraseña
         password = st.text_input("Contraseña de acceso", type="password")
