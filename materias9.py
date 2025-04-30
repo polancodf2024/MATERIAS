@@ -12,6 +12,7 @@ import paramiko
 import csv
 import io
 
+
 # Cargar configuración desde secrets.toml
 def load_config():
     return {
@@ -204,6 +205,7 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
         context.timeout = CONFIG['TIMEOUT_SECONDS']
         
         with smtplib.SMTP(CONFIG['SMTP_SERVER'], CONFIG['SMTP_PORT'], timeout=CONFIG['TIMEOUT_SECONDS']) as server:
+            server.set_debuglevel(1)  # Activar modo debug para ver detalles
             server.ehlo()
             server.starttls(context=context)
             server.ehlo()
@@ -214,12 +216,19 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
     
     except smtplib.SMTPAuthenticationError:
         st.error("🔒 Error de autenticación. Verifica usuario y contraseña SMTP.")
+    except smtplib.SMTPException as e:
+        st.error(f"❌ Error SMTP: {str(e)}")
+        if hasattr(e, 'smtp_code'):
+            st.error(f"Código de error: {e.smtp_code}")
+        if hasattr(e, 'smtp_error'):
+            st.error(f"Mensaje de error: {e.smtp_error}")
     except Exception as e:
         st.error(f"❌ Error al enviar correo: {str(e)}")
+        st.error(f"Tipo de error: {type(e).__name__}")
     return False
 
 def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
-    """Envía material a todos los alumnos de una materia"""
+    """Envía material a todos los alumnos de una materia con seguimiento detallado"""
     alumnos = obtener_alumnos(materia)
     if not alumnos:
         st.warning("No hay alumnos inscritos en esta materia")
@@ -253,16 +262,29 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             
             progreso = st.progress(0)
             exitosos = 0
+            fallidos = []
             
             for i, alumno in enumerate(alumnos):
-                if enviar_correo(alumno['email'], asunto, cuerpo, tmp_file_path):
-                    exitosos += 1
+                try:
+                    if enviar_correo(alumno['email'], asunto, cuerpo, tmp_file_path):
+                        exitosos += 1
+                    else:
+                        fallidos.append(alumno['email'])
+                except Exception as e:
+                    fallidos.append(f"{alumno['email']} (Error: {str(e)})")
                 progreso.progress((i + 1) / len(alumnos))
             
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
             
-            st.success(f"✉️ Enviados: {exitosos}/{len(alumnos)}")
+            st.success(f"✉️ Enviados exitosos: {exitosos}/{len(alumnos)}")
+            
+            if fallidos:
+                st.error("❌ Fallos en los siguientes correos:")
+                with st.expander("Ver detalles de fallos"):
+                    for email in fallidos:
+                        st.write(f"- {email}")
+            
             if archivo_pdf:
                 st.info(f"📄 PDF adjuntado: {archivo_pdf.name}")
             if urls:
@@ -281,7 +303,7 @@ def main():
     # Mostrar logo UNAM en la barra lateral
     st.sidebar.image("unam.svg", width=150)
     
-    st.title("🎓 Sistema de Inscripción Académica")
+    st.title("🎓 Notificaciones a Estudiantes")
     
     modo = st.sidebar.radio(
         "Modo de operación",
@@ -291,7 +313,7 @@ def main():
     )
     
     if modo == "Estudiante":
-        st.header("📝 Registro de Estudiante")
+        st.header("📝 Registro del Estudiante")
         
         with st.form("form_registro", border=True):
             nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez")
