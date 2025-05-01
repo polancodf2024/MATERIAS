@@ -9,9 +9,17 @@ import ssl
 from email.utils import formatdate
 import tempfile
 import paramiko
-import csv
-import io
+import time
+import socket
+from html import unescape
+import re
 
+# Función para eliminar etiquetas HTML
+def strip_tags(html):
+    """Elimina etiquetas HTML de un string"""
+    text = unescape(html)
+    clean = re.compile('<.*?>')
+    return re.sub(clean, '', text)
 
 # Cargar configuración desde secrets.toml
 def load_config():
@@ -25,6 +33,8 @@ def load_config():
         'MAX_FILE_SIZE_MB': st.secrets.get("max_file_size_mb", 10),
         'REMOTE_PASSWORD': st.secrets["remote_password"],
         'TIMEOUT_SECONDS': st.secrets.get("timeout_seconds", 30),
+        'MAX_RETRIES': st.secrets.get("max_retries", 3),
+        'RETRY_DELAY': st.secrets.get("retry_delay", 5),
         'REMOTE': {
             'HOST': st.secrets["remote_host"],
             'USER': st.secrets["remote_user"],
@@ -183,18 +193,39 @@ def enviar_notificacion(nombre, email, materias, fecha):
 def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
     """Envía correos electrónicos con manejo robusto de errores"""
     try:
+        # Validación inicial
         if archivo_adjunto and os.path.getsize(archivo_adjunto) > CONFIG['MAX_FILE_SIZE_MB'] * 1024 * 1024:
             st.error(f"📦 El archivo excede el tamaño máximo de {CONFIG['MAX_FILE_SIZE_MB']}MB")
             return False
 
+        # Configuración del mensaje
         msg = MIMEMultipart()
         msg['From'] = CONFIG['EMAIL_USER']
         msg['To'] = destinatario
         msg['Subject'] = asunto
         msg['Date'] = formatdate(localtime=True)
+        msg['Message-ID'] = f"<{datetime.now().strftime('%Y%m%d%H%M%S')}@{CONFIG['SMTP_SERVER'].split('.')[0]}>"
         
-        msg.attach(MIMEText(cuerpo, 'html', _charset='utf-8'))
+        # Headers adicionales para mejorar la entrega
+        msg['X-Mailer'] = "SistemaAcademicoUNAM"
+        msg['X-Priority'] = "3"  # Prioridad normal
         
+        # Versión alternativa en texto plano
+        text_part = MIMEText(
+            f"{asunto}\n\n" +
+            "Contenido del mensaje:\n" +
+            "----------------------\n" +
+            strip_tags(cuerpo) + "\n\n" +
+            "Este es un mensaje automático, por favor no responda directamente.",
+            'plain'
+        )
+        msg.attach(text_part)
+        
+        # Versión HTML
+        html_part = MIMEText(cuerpo, 'html', _charset='utf-8')
+        msg.attach(html_part)
+        
+        # Adjuntar archivo si existe
         if archivo_adjunto:
             with open(archivo_adjunto, "rb") as f:
                 part = MIMEApplication(f.read(), Name=os.path.basename(archivo_adjunto))
@@ -204,27 +235,85 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
         context = ssl.create_default_context()
         context.timeout = CONFIG['TIMEOUT_SECONDS']
         
-        with smtplib.SMTP(CONFIG['SMTP_SERVER'], CONFIG['SMTP_PORT'], timeout=CONFIG['TIMEOUT_SECONDS']) as server:
-            server.set_debuglevel(1)  # Activar modo debug para ver detalles
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(CONFIG['EMAIL_USER'], CONFIG['EMAIL_PASSWORD'])
-            server.send_message(msg)
+        # Intento de envío con manejo especial para Hotmail
+        max_retries = CONFIG['MAX_RETRIES']
+        retry_delay = CONFIG['RETRY_DELAY']
         
-        return True
+        for attempt in range(max_retries):
+            try:
+                with smtplib.SMTP(CONFIG['SMTP_SERVER'], CONFIG['SMTP_PORT'], timeout=CONFIG['TIMEOUT_SECONDS']) as server:
+                    # Configuración extendida para mejor compatibilidad
+                    server.set_debuglevel(1)  # Mantener debug activado para diagnóstico
+                    server.ehlo_or_helo_if_needed()
+                    
+                    # STARTTLS con configuración mejorada
+                    if CONFIG['SMTP_PORT'] == 587:
+                        server.starttls(context=context)
+                        server.ehlo()
+                    
+                    # Autenticación
+                    server.login(CONFIG['EMAIL_USER'], CONFIG['EMAIL_PASSWORD'])
+                    
+                    # Envío especial para Hotmail/Outlook
+                    if 'hotmail.com' in destinatario.lower() or 'outlook.com' in destinatario.lower():
+                        # Envío en partes para evitar timeout
+                        message_string = msg.as_string()
+                        chunk_size = 1024 * 512  # 512KB por chunk
+                        
+                        for i in range(0, len(message_string), chunk_size):
+                            chunk = message_string[i:i + chunk_size]
+                            server.sendmail(CONFIG['EMAIL_USER'], destinatario, chunk)
+                            time.sleep(1)  # Pequeña pausa entre chunks
+                    else:
+                        # Envío normal para otros proveedores
+                        server.send_message(msg)
+                    
+                    return True
+            
+            except smtplib.SMTPServerDisconnected as e:
+                if attempt == max_retries - 1:
+                    raise
+                st.warning(f"⚠️ Conexión interrumpida. Reintentando ({attempt + 1}/{max_retries})...")
+                time.sleep(retry_delay)
+                continue
+                
+            except smtplib.SMTPResponseException as e:
+                if e.smtp_code == 421:  # Servidor ocupado
+                    if attempt == max_retries - 1:
+                        raise
+                    st.warning(f"⚠️ Servidor ocupado. Reintentando ({attempt + 1}/{max_retries})...")
+                    time.sleep(retry_delay)
+                    continue
+                elif e.smtp_code == 450:  # Correo temporalmente no disponible (Hotmail)
+                    st.error(f"❌ Correo temporalmente no disponible en Hotmail: {destinatario}")
+                    return False
+                else:
+                    raise
     
     except smtplib.SMTPAuthenticationError:
         st.error("🔒 Error de autenticación. Verifica usuario y contraseña SMTP.")
+    except smtplib.SMTPDataError as e:
+        if 'Message rejected as spam' in str(e):
+            st.error("❌ Mensaje marcado como spam por el proveedor de correo")
+            st.info("💡 Sugerencia: Revisa el contenido del mensaje y evita palabras comúnmente asociadas con spam")
+        else:
+            st.error(f"❌ Error en los datos del mensaje: {str(e)}")
+    except smtplib.SMTPRecipientsRefused as e:
+        st.error(f"❌ Destinatario rechazado: {str(e)}")
+        if 'hotmail.com' in destinatario or 'outlook.com' in destinatario:
+            st.info("💡 Hotmail/Outlook puede rechazar correos de servidores no autorizados. Verifica la configuración SPF/DKIM de tu dominio.")
     except smtplib.SMTPException as e:
         st.error(f"❌ Error SMTP: {str(e)}")
         if hasattr(e, 'smtp_code'):
             st.error(f"Código de error: {e.smtp_code}")
         if hasattr(e, 'smtp_error'):
             st.error(f"Mensaje de error: {e.smtp_error}")
+    except socket.timeout:
+        st.error("⌛ Tiempo de espera agotado al conectar con el servidor SMTP")
     except Exception as e:
-        st.error(f"❌ Error al enviar correo: {str(e)}")
+        st.error(f"❌ Error inesperado al enviar correo: {str(e)}")
         st.error(f"Tipo de error: {type(e).__name__}")
+    
     return False
 
 def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
@@ -246,7 +335,7 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             if urls:
                 enlaces_html = "<h3>📌 Enlaces importantes:</h3><ul>"
                 for url in urls:
-                    enlaces_html += f'<li><a href="{url}">{url}</a></li>'
+                    enlaces_html += f'<li><a href="{url}" target="_blank">{url}</a></li>'
                 enlaces_html += "</ul>"
             
             cuerpo = f"""
@@ -255,7 +344,10 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
                     <h2 style="color: #2e6c80;">{asunto}</h2>
                     <div style="white-space: pre-line; margin-bottom: 20px;">{mensaje}</div>
                     {enlaces_html}
-                    <p style="margin-top: 30px;">Saludos,<br>Profesor de {materia}</p>
+                    <p style="margin-top: 30px; font-size: 12px; color: #666;">
+                        Este es un mensaje automático enviado por el sistema académico. 
+                        Por favor no responda directamente a este correo.
+                    </p>
                 </body>
             </html>
             """
