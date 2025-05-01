@@ -181,10 +181,15 @@ def enviar_notificacion(nombre, email, materias, fecha):
                         <td style="padding: 8px; border: 1px solid #ddd;">{fecha}</td>
                     </tr>
                 </table>
+                <p style="margin-top: 20px;">
+                    Este es un mensaje de confirmación de tu registro en el sistema. 
+                    Por favor conserva este correo para futuras referencias.
+                </p>
             </body>
         </html>
         """
         
+        enviar_correo(email, "Confirmación de registro académico", cuerpo)
         enviar_correo(CONFIG['NOTIFICATION_EMAIL'], asunto, cuerpo)
         
     except Exception as e:
@@ -216,7 +221,7 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
             "Contenido del mensaje:\n" +
             "----------------------\n" +
             strip_tags(cuerpo) + "\n\n" +
-            "Este es un mensaje automático, por favor no responda directamente.",
+            "Este es un mensaje automático, por favor no lo respondas directamente.",
             'plain'
         )
         msg.attach(text_part)
@@ -345,8 +350,8 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
                     <div style="white-space: pre-line; margin-bottom: 20px;">{mensaje}</div>
                     {enlaces_html}
                     <p style="margin-top: 30px; font-size: 12px; color: #666;">
-                        Este es un mensaje automático enviado por el sistema académico. 
-                        Por favor no responda directamente a este correo.
+                        Este es un mensaje automático enviado por el sistema. 
+                        Por favor no respondas directamente este correo.
                     </p>
                 </body>
             </html>
@@ -369,16 +374,16 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
             
-            st.success(f"✉️ Enviados exitosos: {exitosos}/{len(alumnos)}")
+            st.success(f"✉️ Correos enviados exitosamente: {exitosos}/{len(alumnos)}")
             
             if fallidos:
-                st.error("❌ Fallos en los siguientes correos:")
-                with st.expander("Ver detalles de fallos"):
+                st.error("❌ No se pudieron enviar a los siguientes correos:")
+                with st.expander("Ver detalles de errores"):
                     for email in fallidos:
                         st.write(f"- {email}")
             
             if archivo_pdf:
-                st.info(f"📄 PDF adjuntado: {archivo_pdf.name}")
+                st.info(f"📄 Archivo adjunto: {archivo_pdf.name}")
             if urls:
                 st.info(f"🔗 Enlaces incluidos: {len(urls)}")
     
@@ -395,7 +400,7 @@ def main():
     # Mostrar logo UNAM en la barra lateral
     st.sidebar.image("unam.svg", width=150)
     
-    st.title("🎓 Notificaciones")
+    st.title("🎓 Notificaciones Académicas")
     
     modo = st.sidebar.radio(
         "Modo de operación",
@@ -405,11 +410,11 @@ def main():
     )
     
     if modo == "Estudiante":
-        st.header("📝 Registro Estudiante")
+        st.header("📝 Registro de Estudiante")
         
         with st.form("form_registro", border=True):
-            nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez")
-            email = st.text_input("Correo electrónico*", placeholder="Ej: juan@ejemplo.com")
+            nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez López")
+            email = st.text_input("Correo electrónico*", placeholder="Ej: juan.perez@correo.unam.mx")
             
             st.markdown("**Selecciona tus materias:**")
             cols = st.columns(2)
@@ -424,68 +429,79 @@ def main():
                 if not nombre or not email:
                     st.warning("⚠️ Por favor completa todos los campos obligatorios")
                 elif not materias_seleccionadas:
-                    st.warning("⚠️ Selecciona al menos una materia")
+                    st.warning("⚠️ Debes seleccionar al menos una materia")
                 elif registrar_alumno(nombre, email, materias_seleccionadas):
-                    st.success("✅ Registro exitoso!")
+                    st.success("""✅ ¡Registro completado exitosamente!
+                    
+                    **Importante:** Hemos enviado un correo de confirmación a tu dirección. Si no lo ves en tu bandeja de entrada:
+                    
+                    1. Revisa tu carpeta de **Spam** o **Correo no deseado**
+                    2. Agrega nuestra dirección ({}) a tus contactos
+                    3. Espera 5-10 minutos y vuelve a revisar
+                    
+                    Si después de 15 minutos no has recibido el correo, por favor contacta al administrador del sistema con tu nombre y correo electrónico.
+                    """.format(CONFIG['EMAIL_USER']))
                     st.balloons()
     
     elif modo == "Profesor":
-        st.header("🔒 Acceso del Profesor")
+        st.header("🔒 Acceso para Profesores")
         
         # Verificación de contraseña
-        password = st.text_input("Contraseña de acceso", type="password")
+        password = st.text_input("Contraseña de acceso", type="password", help="Ingresa la contraseña proporcionada por el administrador")
         
         if password == CONFIG['REMOTE_PASSWORD']:
             st.session_state.profesor_autenticado = True
         
         if st.session_state.get('profesor_autenticado', False):
-            st.header("📤 Envío de Material")
+            st.success("🔓 Acceso autorizado")
+            st.header("📤 Envío de Material Académico")
             
             materia = st.selectbox(
                 "Selecciona una materia",
                 list(CONFIG['REMOTE']['FILES'].keys()),
                 index=None,
-                placeholder="Elige una materia..."
+                placeholder="Selecciona una materia de la lista..."
             )
             
             if materia:
                 alumnos = obtener_alumnos(materia)
                 
                 if alumnos:
-                    st.subheader(f"👥 Alumnos inscritos ({len(alumnos)})")
+                    st.subheader(f"👥 Alumnos inscritos: {len(alumnos)}")
                     
-                    with st.expander("Ver lista completa", expanded=False):
+                    with st.expander("Ver lista completa de alumnos", expanded=False):
                         for alumno in alumnos:
                             st.write(f"- **{alumno['nombre']}** ({alumno['email']}) - Registrado el {alumno['fecha']}")
                     
                     st.divider()
-                    st.subheader("📨 Enviar material")
+                    st.subheader("📨 Componer mensaje")
                     
                     with st.form("form_envio", border=True):
-                        asunto = st.text_input("Asunto*", placeholder="Ej: Material para la próxima clase")
-                        mensaje = st.text_area("Mensaje*", height=150, placeholder="Escribe aquí el contenido del mensaje...")
+                        asunto = st.text_input("Asunto*", placeholder="Ej: Material de estudio para el examen parcial")
+                        mensaje = st.text_area("Mensaje*", height=150, placeholder="Escribe aquí el contenido que recibirán los estudiantes...")
                         
-                        st.markdown("**🔗 Enlaces importantes (opcional):**")
+                        st.markdown("**🔗 Enlaces adicionales (opcional):**")
                         urls = []
                         for i in range(3):
-                            url = st.text_input(f"URL {i+1}", key=f"url_{i}", placeholder="https://ejemplo.com")
+                            url = st.text_input(f"Enlace {i+1}", key=f"url_{i}", placeholder="https://ejemplo.com/recurso")
                             if url:
                                 urls.append(url)
                         
                         archivo_pdf = st.file_uploader(
-                            f"📄 Adjuntar PDF (opcional, máximo {CONFIG['MAX_FILE_SIZE_MB']}MB)", 
-                            type="pdf"
+                            f"📄 Adjuntar archivo PDF (opcional, máximo {CONFIG['MAX_FILE_SIZE_MB']}MB)", 
+                            type="pdf",
+                            help="Sube un archivo PDF que se enviará adjunto a todos los estudiantes"
                         )
                         
-                        if st.form_submit_button("Enviar a todos", type="primary"):
+                        if st.form_submit_button("Enviar a todos los alumnos", type="primary"):
                             if not asunto or not mensaje:
-                                st.warning("⚠️ Completa los campos obligatorios")
+                                st.warning("⚠️ Debes completar todos los campos obligatorios")
                             else:
                                 enviar_material(materia, asunto, mensaje, urls, archivo_pdf)
                 else:
-                    st.warning("ℹ️ No hay alumnos inscritos en esta materia")
+                    st.warning("ℹ️ Actualmente no hay alumnos inscritos en esta materia")
         elif password and password != CONFIG['REMOTE_PASSWORD']:
-            st.error("❌ Contraseña incorrecta. Inténtalo de nuevo.")
+            st.error("❌ Contraseña incorrecta. Por favor inténtalo nuevamente.")
 
 if __name__ == "__main__":
     main()
