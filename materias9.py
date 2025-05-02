@@ -162,7 +162,7 @@ def enviar_notificacion(nombre, email, materias, fecha):
         cuerpo = f"""
         <html>
             <body style="font-family: Arial, sans-serif;">
-                <h2 style="color: #2e6c80;">Nuevo registro en el sistema académico</h2>
+                <h2 style="color: #2e6c80;">Nuevo registro en el sistema</h2>
                 <table style="border-collapse: collapse; width: 100%;">
                     <tr style="background-color: #f2f2f2;">
                         <td style="padding: 8px; border: 1px solid #ddd; width: 30%;"><strong>Nombre:</strong></td>
@@ -410,7 +410,7 @@ def main():
     )
     
     if modo == "Estudiante":
-        st.header("📝 Registro de Estudiante")
+        st.header("📝 Registro del Estudiante")
         
         with st.form("form_registro", border=True):
             nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez López")
