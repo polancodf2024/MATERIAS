@@ -1,11 +1,11 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import os
 import smtplib
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
-from datetime import datetime
-import ssl
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from email.utils import formatdate
 import tempfile
 import paramiko
@@ -13,6 +13,8 @@ import time
 import socket
 from html import unescape
 import re
+from datetime import datetime
+import ssl
 
 # Función para eliminar etiquetas HTML
 def strip_tags(html):
@@ -47,9 +49,9 @@ def load_config():
                 'Estadística no Paramétrica': st.secrets["remote_parametrica"],
                 'Bioestadística I': st.secrets["remote_bioestadistica1"],
                 'Bioestadística II': st.secrets["remote_bioestadistica2"],
-                'Análisis Multivariado y Multicategórico': st.secrets["remote_categorico"],
+                'Análisis Multivariado': st.secrets["remote_categorico"],
                 'Manejo e Interpretación de Datos': st.secrets["remote_manejo"],
-                'Diseño Experimental': st.secrets["remote_diseno"]
+                'Diseño de Experimentos': st.secrets["remote_diseno"]
             }
         }
     }
@@ -65,7 +67,7 @@ def get_sftp_connection():
         transport.connect(username=CONFIG['REMOTE']['USER'], password=CONFIG['REMOTE']['PASSWORD'])
         return paramiko.SFTPClient.from_transport(transport)
     except Exception as e:
-        st.error(f"🚨 Error de conexión SFTP: {str(e)}")
+        st.error(f"Error de conexión SFTP: {str(e)}")
         return None
 
 def obtener_alumnos(materia):
@@ -96,10 +98,10 @@ def obtener_alumnos(materia):
         return alumnos
         
     except FileNotFoundError:
-        st.warning(f"⚠️ Archivo no encontrado en servidor: {materia}")
+        st.warning(f"Archivo no encontrado en servidor: {materia}")
         return []
     except Exception as e:
-        st.error(f"❌ Error al leer archivo remoto: {str(e)}")
+        st.error(f"Error al leer archivo remoto: {str(e)}")
         return []
     finally:
         sftp.close()
@@ -152,7 +154,7 @@ def registrar_alumno(nombre, email, materias):
         return True
         
     except Exception as e:
-        st.error(f"❌ Error al registrar: {str(e)}")
+        st.error(f"Error al registrar: {str(e)}")
         return False
     finally:
         sftp.close()
@@ -160,7 +162,7 @@ def registrar_alumno(nombre, email, materias):
 def enviar_notificacion(nombre, email, materias, fecha):
     """Envía notificación por correo electrónico"""
     try:
-        asunto = f"📝 Nuevo registro: {nombre}"
+        asunto = f"Nuevo registro: {nombre}"
         cuerpo = f"""
         <html>
             <body style="font-family: Arial, sans-serif;">
@@ -195,14 +197,14 @@ def enviar_notificacion(nombre, email, materias, fecha):
         enviar_correo(CONFIG['NOTIFICATION_EMAIL'], asunto, cuerpo)
         
     except Exception as e:
-        st.error(f"⚠️ Error al enviar notificación: {str(e)}")
+        st.error(f"Error al enviar notificación: {str(e)}")
 
-def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
+def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None, nombre_original=None):
     """Envía correos electrónicos con manejo robusto de errores"""
     try:
         # Validación inicial
         if archivo_adjunto and os.path.getsize(archivo_adjunto) > CONFIG['MAX_FILE_SIZE_MB'] * 1024 * 1024:
-            st.error(f"📦 El archivo excede el tamaño máximo de {CONFIG['MAX_FILE_SIZE_MB']}MB")
+            st.error(f"El archivo excede el tamaño máximo de {CONFIG['MAX_FILE_SIZE_MB']}MB")
             return False
 
         # Configuración del mensaje
@@ -212,10 +214,6 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
         msg['Subject'] = asunto
         msg['Date'] = formatdate(localtime=True)
         msg['Message-ID'] = f"<{datetime.now().strftime('%Y%m%d%H%M%S')}@{CONFIG['SMTP_SERVER'].split('.')[0]}>"
-        
-        # Headers adicionales para mejorar la entrega
-        msg['X-Mailer'] = "SistemaAcademicoUNAM"
-        msg['X-Priority'] = "3"  # Prioridad normal
         
         # Versión alternativa en texto plano
         text_part = MIMEText(
@@ -232,93 +230,45 @@ def enviar_correo(destinatario, asunto, cuerpo, archivo_adjunto=None):
         html_part = MIMEText(cuerpo, 'html', _charset='utf-8')
         msg.attach(html_part)
         
-        # Adjuntar archivo si existe
+        # Adjuntar archivo si existe (usando MIMEBase)
         if archivo_adjunto:
             with open(archivo_adjunto, "rb") as f:
-                part = MIMEApplication(f.read(), Name=os.path.basename(archivo_adjunto))
-                part['Content-Disposition'] = f'attachment; filename="{os.path.basename(archivo_adjunto)}"'
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(f.read())
+                encoders.encode_base64(part)
+                # Usar nombre_original si está disponible, de lo contrario usar el nombre del archivo temporal
+                nombre_adjunto = nombre_original if nombre_original else os.path.basename(archivo_adjunto)
+                part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename="{nombre_adjunto}"'
+                )
                 msg.attach(part)
         
         context = ssl.create_default_context()
-        context.timeout = CONFIG['TIMEOUT_SECONDS']
         
-        # Intento de envío con manejo especial para Hotmail
-        max_retries = CONFIG['MAX_RETRIES']
-        retry_delay = CONFIG['RETRY_DELAY']
-        
-        for attempt in range(max_retries):
-            try:
-                with smtplib.SMTP(CONFIG['SMTP_SERVER'], CONFIG['SMTP_PORT'], timeout=CONFIG['TIMEOUT_SECONDS']) as server:
-                    # Configuración extendida para mejor compatibilidad
-                    server.set_debuglevel(1)  # Mantener debug activado para diagnóstico
-                    server.ehlo_or_helo_if_needed()
-                    
-                    # STARTTLS con configuración mejorada
-                    if CONFIG['SMTP_PORT'] == 587:
-                        server.starttls(context=context)
-                        server.ehlo()
-                    
-                    # Autenticación
-                    server.login(CONFIG['EMAIL_USER'], CONFIG['EMAIL_PASSWORD'])
-                    
-                    # Envío especial para Hotmail/Outlook
-                    if 'hotmail.com' in destinatario.lower() or 'outlook.com' in destinatario.lower():
-                        # Envío en partes para evitar timeout
-                        message_string = msg.as_string()
-                        chunk_size = 1024 * 512  # 512KB por chunk
-                        
-                        for i in range(0, len(message_string), chunk_size):
-                            chunk = message_string[i:i + chunk_size]
-                            server.sendmail(CONFIG['EMAIL_USER'], destinatario, chunk)
-                            time.sleep(1)  # Pequeña pausa entre chunks
-                    else:
-                        # Envío normal para otros proveedores
-                        server.send_message(msg)
-                    
-                    return True
+        # Intento de envío
+        with smtplib.SMTP(CONFIG['SMTP_SERVER'], CONFIG['SMTP_PORT']) as server:
+            server.ehlo()
             
-            except smtplib.SMTPServerDisconnected as e:
-                if attempt == max_retries - 1:
-                    raise
-                st.warning(f"⚠️ Conexión interrumpida. Reintentando ({attempt + 1}/{max_retries})...")
-                time.sleep(retry_delay)
-                continue
-                
-            except smtplib.SMTPResponseException as e:
-                if e.smtp_code == 421:  # Servidor ocupado
-                    if attempt == max_retries - 1:
-                        raise
-                    st.warning(f"⚠️ Servidor ocupado. Reintentando ({attempt + 1}/{max_retries})...")
-                    time.sleep(retry_delay)
-                    continue
-                elif e.smtp_code == 450:  # Correo temporalmente no disponible (Hotmail)
-                    st.error(f"❌ Correo temporalmente no disponible en Hotmail: {destinatario}")
-                    return False
-                else:
-                    raise
+            if CONFIG['SMTP_PORT'] == 587:
+                server.starttls(context=context)
+                server.ehlo()
+            
+            server.login(CONFIG['EMAIL_USER'], CONFIG['EMAIL_PASSWORD'])
+            server.send_message(msg)
+            
+        return True
     
     except smtplib.SMTPAuthenticationError:
-        st.error("🔒 Error de autenticación. Verifica usuario y contraseña SMTP.")
-    except smtplib.SMTPDataError as e:
-        if 'Message rejected as spam' in str(e):
-            st.error("❌ Mensaje marcado como spam por el proveedor de correo")
-            st.info("💡 Sugerencia: Revisa el contenido del mensaje y evita palabras comúnmente asociadas con spam")
-        else:
-            st.error(f"❌ Error en los datos del mensaje: {str(e)}")
-    except smtplib.SMTPRecipientsRefused as e:
-        st.error(f"❌ Destinatario rechazado: {str(e)}")
-        if 'hotmail.com' in destinatario or 'outlook.com' in destinatario:
-            st.info("💡 Hotmail/Outlook puede rechazar correos de servidores no autorizados. Verifica la configuración SPF/DKIM de tu dominio.")
+        st.error("Error de autenticación. Verifica usuario y contraseña SMTP.")
     except smtplib.SMTPException as e:
-        st.error(f"❌ Error SMTP: {str(e)}")
+        st.error(f"Error SMTP: {str(e)}")
         if hasattr(e, 'smtp_code'):
             st.error(f"Código de error: {e.smtp_code}")
         if hasattr(e, 'smtp_error'):
             st.error(f"Mensaje de error: {e.smtp_error}")
-    except socket.timeout:
-        st.error("⌛ Tiempo de espera agotado al conectar con el servidor SMTP")
     except Exception as e:
-        st.error(f"❌ Error inesperado al enviar correo: {str(e)}")
+        st.error(f"Error inesperado al enviar correo: {str(e)}")
         st.error(f"Tipo de error: {type(e).__name__}")
     
     return False
@@ -335,12 +285,14 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             if archivo_pdf:
                 tmp_file.write(archivo_pdf.getvalue())
                 tmp_file_path = tmp_file.name
+                nombre_original = archivo_pdf.name  # Guardar el nombre original
             else:
                 tmp_file_path = None
+                nombre_original = None
             
             enlaces_html = ""
             if urls:
-                enlaces_html = "<h3>📌 Enlaces importantes:</h3><ul>"
+                enlaces_html = "<h3>Enlaces importantes:</h3><ul>"
                 for url in urls:
                     enlaces_html += f'<li><a href="{url}" target="_blank">{url}</a></li>'
                 enlaces_html += "</ul>"
@@ -365,7 +317,7 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             
             for i, alumno in enumerate(alumnos):
                 try:
-                    if enviar_correo(alumno['email'], asunto, cuerpo, tmp_file_path):
+                    if enviar_correo(alumno['email'], asunto, cuerpo, tmp_file_path, nombre_original):
                         exitosos += 1
                     else:
                         fallidos.append(alumno['email'])
@@ -376,21 +328,21 @@ def enviar_material(materia, asunto, mensaje, urls=None, archivo_pdf=None):
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
             
-            st.success(f"✉️ Correos enviados exitosamente: {exitosos}/{len(alumnos)}")
+            st.success(f"Correos enviados exitosamente: {exitosos}/{len(alumnos)}")
             
             if fallidos:
-                st.error("❌ No se pudieron enviar a los siguientes correos:")
+                st.error("No se pudieron enviar a los siguientes correos:")
                 with st.expander("Ver detalles de errores"):
                     for email in fallidos:
                         st.write(f"- {email}")
             
             if archivo_pdf:
-                st.info(f"📄 Archivo adjunto: {archivo_pdf.name}")
+                st.info(f"Archivo adjunto: {archivo_pdf.name}")
             if urls:
-                st.info(f"🔗 Enlaces incluidos: {len(urls)}")
+                st.info(f"Enlaces incluidos: {len(urls)}")
     
     except Exception as e:
-        st.error(f"❌ Error al enviar material: {str(e)}")
+        st.error(f"Error al enviar material: {str(e)}")
 
 def main():
     st.set_page_config(
@@ -402,7 +354,7 @@ def main():
     # Mostrar logo UNAM en la barra lateral
     st.sidebar.image("unam.svg", width=150)
     
-    st.title("🎓 Notificaciones Académicas")
+    st.title("Notificaciones Académicas")
     
     modo = st.sidebar.radio(
         "Modo de operación",
@@ -412,7 +364,7 @@ def main():
     )
     
     if modo == "Estudiante":
-        st.header("📝 Registro del Estudiante")
+        st.header("Registro del Estudiante")
         
         with st.form("form_registro", border=True):
             nombre = st.text_input("Nombre completo*", placeholder="Ej: Juan Pérez López")
@@ -429,11 +381,11 @@ def main():
             
             if st.form_submit_button("Registrarme", type="primary"):
                 if not nombre or not email:
-                    st.warning("⚠️ Por favor completa todos los campos obligatorios")
+                    st.warning("Por favor completa todos los campos obligatorios")
                 elif not materias_seleccionadas:
-                    st.warning("⚠️ Debes seleccionar al menos una materia")
+                    st.warning("Debes seleccionar al menos una materia")
                 elif registrar_alumno(nombre, email, materias_seleccionadas):
-                    st.success("""✅ ¡Registro completado exitosamente!
+                    st.success("""¡Registro completado exitosamente!
                     
                     **Importante:** Hemos enviado un correo de confirmación a tu dirección. Si no lo ves en tu bandeja de entrada:
                     
@@ -446,7 +398,7 @@ def main():
                     st.balloons()
     
     elif modo == "Profesor":
-        st.header("🔒 Acceso para Profesores")
+        st.header("Acceso para Profesores")
         
         # Verificación de contraseña
         password = st.text_input("Contraseña de acceso", type="password", help="Ingresa la contraseña proporcionada por el administrador")
@@ -455,8 +407,8 @@ def main():
             st.session_state.profesor_autenticado = True
         
         if st.session_state.get('profesor_autenticado', False):
-            st.success("🔓 Acceso autorizado")
-            st.header("📤 Envío de Material Académico")
+            st.success("Acceso autorizado")
+            st.header("Envío de Material Académico")
             
             materia = st.selectbox(
                 "Selecciona una materia",
@@ -469,20 +421,20 @@ def main():
                 alumnos = obtener_alumnos(materia)
                 
                 if alumnos:
-                    st.subheader(f"👥 Alumnos inscritos: {len(alumnos)}")
+                    st.subheader(f"Alumnos inscritos: {len(alumnos)}")
                     
                     with st.expander("Ver lista completa de alumnos", expanded=False):
                         for alumno in alumnos:
                             st.write(f"- **{alumno['nombre']}** ({alumno['email']}) - Registrado el {alumno['fecha']}")
                     
                     st.divider()
-                    st.subheader("📨 Componer mensaje")
+                    st.subheader("Componer mensaje")
                     
                     with st.form("form_envio", border=True):
                         asunto = st.text_input("Asunto*", placeholder="Ej: Material de estudio para el examen parcial")
                         mensaje = st.text_area("Mensaje*", height=150, placeholder="Escribe aquí el contenido que recibirán los estudiantes...")
                         
-                        st.markdown("**🔗 Enlaces adicionales (opcional):**")
+                        st.markdown("**Enlaces adicionales (opcional):**")
                         urls = []
                         for i in range(3):
                             url = st.text_input(f"Enlace {i+1}", key=f"url_{i}", placeholder="https://ejemplo.com/recurso")
@@ -490,20 +442,20 @@ def main():
                                 urls.append(url)
                         
                         archivo_pdf = st.file_uploader(
-                            f"📄 Adjuntar archivo PDF (opcional, máximo {CONFIG['MAX_FILE_SIZE_MB']}MB)", 
+                            f"Adjuntar archivo PDF (opcional, máximo {CONFIG['MAX_FILE_SIZE_MB']}MB)", 
                             type="pdf",
                             help="Sube un archivo PDF que se enviará adjunto a todos los estudiantes"
                         )
                         
                         if st.form_submit_button("Enviar a todos los alumnos", type="primary"):
                             if not asunto or not mensaje:
-                                st.warning("⚠️ Debes completar todos los campos obligatorios")
+                                st.warning("Debes completar todos los campos obligatorios")
                             else:
                                 enviar_material(materia, asunto, mensaje, urls, archivo_pdf)
                 else:
-                    st.warning("ℹ️ Actualmente no hay alumnos inscritos en esta materia")
+                    st.warning("Actualmente no hay alumnos inscritos en esta materia")
         elif password and password != CONFIG['REMOTE_PASSWORD']:
-            st.error("❌ Contraseña incorrecta. Por favor inténtalo nuevamente.")
+            st.error("Contraseña incorrecta. Por favor inténtalo nuevamente.")
 
 if __name__ == "__main__":
     main()
