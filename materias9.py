@@ -47,7 +47,9 @@ def load_config():
                 'Estadística no Paramétrica': st.secrets["remote_parametrica"],
                 'Bioestadística I': st.secrets["remote_bioestadistica1"],
                 'Bioestadística II': st.secrets["remote_bioestadistica2"],
-                'Análisis Multicategórico': st.secrets["remote_categorico"]
+                'Análisis Multivariado y Multicategórico': st.secrets["remote_categorico"],
+                'Manejo e Interpretación de Datos': st.secrets["remote_manejo"],
+                'Diseño Experimental': st.secrets["remote_diseno"]
             }
         }
     }
