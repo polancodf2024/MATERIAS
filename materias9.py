@@ -15,6 +15,7 @@ from html import unescape
 import re
 from datetime import datetime
 import ssl
+import csv
 
 # Función para eliminar etiquetas HTML
 def strip_tags(html):
@@ -212,8 +213,208 @@ TEMARIOS = {
 
 CONFIG = load_config()
 
-# ... (las funciones get_sftp_connection, obtener_alumnos, registrar_alumno, 
-# enviar_notificacion, enviar_correo y enviar_material se mantienen igual)
+def verificar_crear_archivo():
+    """Verifica si el archivo existe y tiene el formato correcto, solo lo crea si no existe"""
+    try:
+        # Verificar si el archivo existe
+        if os.path.exists(CONFIG['CSV_MATERIAS']):
+            # Verificar que tenga contenido y formato válido
+            if os.path.getsize(CONFIG['CSV_MATERIAS']) > 0:
+                with open(CONFIG['CSV_MATERIAS'], 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader, None)
+                    if headers and all(col in headers for col in ['nombre', 'email', 'materias']):
+                        return True
+                    else:
+                        st.error("El archivo existe pero no tiene el formato correcto")
+                        return False
+            return True
+        else:
+            # Crear archivo solo si no existe
+            with open(CONFIG['CSV_MATERIAS'], 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=['nombre', 'email', 'materias', 'fecha'])
+                writer.writeheader()
+            return True
+    except Exception as e:
+        st.error(f"Error al verificar/crear archivo: {str(e)}")
+        return False
+
+def get_sftp_connection():
+    """Establece conexión SFTP con el servidor remoto"""
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        ssh.connect(
+            hostname=CONFIG['REMOTE']['HOST'],
+            port=CONFIG['REMOTE']['PORT'],
+            username=CONFIG['REMOTE']['USER'],
+            password=CONFIG['REMOTE']['PASSWORD'],
+            timeout=CONFIG['TIMEOUT_SECONDS']
+        )
+        return ssh.open_sftp()
+    except Exception as e:
+        st.error(f"Error de conexión SFTP: {str(e)}")
+        return None
+
+def obtener_alumnos(materia):
+    """Obtiene la lista de alumnos inscritos en una materia específica"""
+    if not verificar_crear_archivo():
+        return []
+    
+    try:
+        with open(CONFIG['CSV_MATERIAS'], 'r', encoding='utf-8') as f:
+            alumnos = []
+            reader = csv.DictReader(f)
+            
+            # Verificar nuevamente las columnas por seguridad
+            if not all(col in reader.fieldnames for col in ['nombre', 'email', 'materias']):
+                st.error("El archivo no tiene las columnas requeridas")
+                return []
+            
+            for row in reader:
+                try:
+                    if materia.lower() in [m.strip().lower() for m in row['materias'].split(',')]:
+                        alumnos.append({
+                            'nombre': row.get('nombre', ''),
+                            'email': row.get('email', ''),
+                            'fecha': row.get('fecha', 'Fecha no disponible')
+                        })
+                except (KeyError, AttributeError):
+                    continue
+            return alumnos
+    except Exception as e:
+        st.error(f"Error al leer el archivo: {str(e)}")
+        return []
+
+def registrar_alumno(nombre, email, materias_seleccionadas):
+    """Registra un nuevo alumno en el sistema"""
+    if not verificar_crear_archivo():
+        return False
+    
+    try:
+        with open(CONFIG['CSV_MATERIAS'], 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['nombre', 'email', 'materias', 'fecha'])
+            
+            writer.writerow({
+                'nombre': nombre.strip(),
+                'email': email.strip(),
+                'materias': ', '.join(m.strip() for m in materias_seleccionadas),
+                'fecha': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        # Enviar correo de confirmación
+        asunto = "Confirmación de registro en materias académicas"
+        mensaje = f"""
+        Hola {nombre},
+        
+        Gracias por registrarte en las siguientes materias:
+        {', '.join(materias_seleccionadas)}
+        
+        Recibirás materiales y notificaciones importantes en este correo electrónico.
+        
+        Saludos,
+        Equipo Académico
+        """
+        enviar_correo(email, asunto, mensaje)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error al registrar al alumno: {str(e)}")
+        return False
+
+def enviar_notificacion(asunto, mensaje):
+    """Envía una notificación al administrador"""
+    try:
+        enviar_correo(CONFIG['NOTIFICATION_EMAIL'], asunto, mensaje)
+        return True
+    except Exception as e:
+        st.error(f"Error al enviar notificación: {str(e)}")
+        return False
+
+def enviar_correo(destinatario, asunto, mensaje, adjunto=None):
+    """Envía un correo electrónico con opción a adjunto"""
+    try:
+        # Configurar el mensaje
+        msg = MIMEMultipart()
+        msg['From'] = CONFIG['EMAIL_USER']
+        msg['To'] = destinatario
+        msg['Date'] = formatdate(localtime=True)
+        msg['Subject'] = asunto
+        
+        # Adjuntar el cuerpo del mensaje
+        msg.attach(MIMEText(mensaje, 'plain'))
+        
+        # Adjuntar archivo si se proporciona
+        if adjunto:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(adjunto.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename="{adjunto.name}"'
+            )
+            msg.attach(part)
+        
+        # Configurar conexión segura con el servidor SMTP
+        context = ssl.create_default_context()
+        
+        with smtplib.SMTP_SSL(
+            CONFIG['SMTP_SERVER'],
+            CONFIG['SMTP_PORT'],
+            context=context
+        ) as server:
+            server.login(CONFIG['EMAIL_USER'], CONFIG['EMAIL_PASSWORD'])
+            server.sendmail(CONFIG['EMAIL_USER'], destinatario, msg.as_string())
+        
+        return True
+    except Exception as e:
+        st.error(f"Error al enviar correo: {str(e)}")
+        return False
+
+def enviar_material(materia, asunto, mensaje, urls, archivo_pdf):
+    """Envía material a todos los alumnos de una materia"""
+    try:
+        alumnos = obtener_alumnos(materia)
+        if not alumnos:
+            st.warning("No hay alumnos inscritos en esta materia")
+            return False
+        
+        # Preparar mensaje con URLs si existen
+        if urls:
+            mensaje += "\n\nEnlaces adicionales:\n"
+            for i, url in enumerate(urls, 1):
+                mensaje += f"{i}. {url}\n"
+        
+        # Verificar tamaño del archivo adjunto
+        if archivo_pdf:
+            max_size = CONFIG['MAX_FILE_SIZE_MB'] * 1024 * 1024
+            if archivo_pdf.size > max_size:
+                st.error(f"El archivo excede el tamaño máximo permitido ({CONFIG['MAX_FILE_SIZE_MB']}MB)")
+                return False
+        
+        # Enviar a cada alumno
+        total = len(alumnos)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, alumno in enumerate(alumnos, 1):
+            status_text.text(f"Enviando a {alumno['nombre']} ({i}/{total})...")
+            enviar_correo(
+                alumno['email'],
+                asunto,
+                f"Hola {alumno['nombre']},\n\n{mensaje}",
+                archivo_pdf
+            )
+            progress_bar.progress(i / total)
+            time.sleep(1)  # Pequeña pausa para evitar bloqueos
+        
+        status_text.text("")
+        st.success(f"Material enviado correctamente a {total} alumnos")
+        return True
+    except Exception as e:
+        st.error(f"Error al enviar material: {str(e)}")
+        return False
 
 def main():
     st.set_page_config(
@@ -303,6 +504,24 @@ def main():
         if st.session_state.get('profesor_autenticado', False):
             st.success("Acceso autorizado")
             st.header("Envío de Material Académico")
+            
+            # Diagnóstico del archivo
+            with st.expander("🔍 Diagnóstico del archivo de registros", expanded=False):
+                if os.path.exists(CONFIG['CSV_MATERIAS']):
+                    st.success(f"Archivo encontrado: {CONFIG['CSV_MATERIAS']}")
+                    try:
+                        with open(CONFIG['CSV_MATERIAS'], 'r', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            if reader.fieldnames and all(col in reader.fieldnames for col in ['nombre', 'email', 'materias']):
+                                st.success("Formato del archivo válido")
+                                num_alumnos = sum(1 for _ in reader)
+                                st.info(f"Total de registros: {num_alumnos}")
+                            else:
+                                st.error("El archivo no tiene el formato correcto")
+                    except Exception as e:
+                        st.error(f"Error al leer el archivo: {str(e)}")
+                else:
+                    st.warning("El archivo de registros no existe aún")
             
             materia = st.selectbox(
                 "Selecciona una materia",
