@@ -53,33 +53,117 @@ CONFIG = Config()
 TEMARIOS = {
     'Estadística no Paramétrica': {
         'contenido': [
-            "1. PRUEBA DE SIGNO PARA LA MEDIANA",
-            "2. PRUEBA PARA LA TENDENCIA",
-            "3. PRUEBA DE ALEATORIEDAD",
-            "4. PRUEBA DE IGUALDAD DE DISTRIBUCIONES",
-            "5. PRUEBA DE RANGO (Mann-Whitney)",
-            "6. PRUEBA DE KRUSKAL-WALLIS"
+            "PRUEBA DE SIGNO PARA LA MEDIANA",
+            "PRUEBA PARA LA TENDENCIA",
+            "PRUEBA DE ALEATORIEDAD",
+            "PRUEBA DE IGUALDAD DE DISTRIBUCIONES",
+            "PRUEBA DE RANGO (Mann-Whitney)",
+            "DIAGONALIZACIÓN (SVD)"
         ],
         'evaluacion': [
-            "Examen final 100%",
-            "Material en PDF proporcionado",
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
             "Videos semanales explicativos"
         ]
     },
     'Cálculo Diferencial e Integral III': {
         'contenido': [
-            "1. GEOMETRÍA DEL ESPACIO EUCLIDIANO",
-            "2. DIFERENCIACIÓN",
-            "3. FUNCIONES VECTORIALES",
-            "4. DERIVADAS DE ORDEN SUPERIOR"
+            "GEOMETRÍA DEL ESPACIO EUCLIDIANO",
+            "DIFERENCIACIÓN",
+            "FUNCIONES VECTORIALES",
+            "DERIVADAS DE ORDEN SUPERIOR"
         ],
         'evaluacion': [
-            "4 exámenes parciales",
+            "Cuatro exámenes parciales",
             "Reposiciones disponibles",
-            "Libro de texto en PDF"
+            "Libro de texto en PDF proporcionado por el profesor"
         ]
     },
-    # [...] (Agregar todas las demás materias con la misma estructura)
+    'Cálculo Diferencial e Integral IV': {
+        'contenido': [
+            "INTEGRALES DOBLES Y TRIPLES (SIN MAPEOS)",
+            "INTEGRALES DOBLES Y TRIPLES (CON MAPEOS)",
+            "INTEGRAL DE LINEA Y DE SUPERFICIE",
+            "TEOREMA DE GREEN, STOKES Y GAUSS"
+        ],
+        'evaluacion': [
+            "Cuatro exámenes parciales",
+            "Reposiciones disponibles",
+            "Libro de texto en PDF proporcionado por el profesor"
+        ]
+    },
+    'Bioestadística I': {
+        'contenido': [
+            "PRUEBA DE SIGNO PARA LA MEDIANA",
+            "ESTADÍSTICA DESCRIPTIVA EN CIENCIAS DE LA SALUD",
+            "PROBABILIDAD EN DIAGNÓSTICO CLÍNICO",
+            "INFERENCIA BÁSICA",
+            "REGRESIÓN LINEAL EN INVESTIGACIÓN CLÍNICA"
+        ],
+        'evaluacion': [
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
+            "Videos semanales explicativos"
+        ]
+    },    
+    'Bioestadística II': {
+        'contenido': [
+            "MODELOS LINEALES GENERALIZADOS (GLM)",
+            "ANÁLISIS DE SUPERVIVENCIA",
+            "DISEÑO DE ESTUDIOS",
+            "BIOESTADÍSTICA MULTIVARIANTE"
+        ],
+        'evaluacion': [
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
+            "Videos semanales explicativos"
+        ]
+    },
+    'Análisis Multivariado y Multicategórico': {
+        'contenido': [
+            "DIAGONALIZACIÓN (SVD)"
+            "NORMAL MULTIVARIADA",
+            "CONTRASTE MEDIAS-COVARIANZAS",
+            "CORRELACIÓN CANÓNICA",
+            "REGRESIÓN MULTIVARIADA",
+            "DISCRIMINACIÓN (MINIMAX/FISHER)",
+            "COMPONENTES PRINCIPALES",
+            "TABLAS DE CONTINGENCIA"           
+        ],
+        'evaluacion': [
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
+            "Videos semanales explicativos"
+        ]
+    },
+    'Manejo e Interpretación de Datos': {
+        'contenido': [
+            "FUNDAMENTOS DE DATOS EN SALUD",
+            "HERRAMIENTAS COMPUTACIONALES",
+            "PROCESAMIENTO DE DATOS",
+            "ANÁLISIS EXPLORATORIO",
+            "INTERPRETACIÓN DE RESULTADOS"            
+        ],
+        'evaluacion': [
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
+            "Videos semanales explicativos"
+        ]
+    },
+    'Análisis de Experimentos': {
+        'contenido': [
+            "EXPERIMENTOS DE COMPARACIÓN SIMPLE",
+            "BLOQUES ALEATORIZADOS, CUADRADOS LATINOS", 
+            "Y DISEÑOS RELACIONADOS",
+            "DISEÑOS FACTORIALES",
+            "MÉTODOS Y DISEÑOS DE SUPERFICIE DE RESPUESTA"
+        ],
+        'evaluacion': [
+            "No tareas ni exámenes",
+            "Libro de texto en PDF proporcionado por el profesor",
+            "Videos semanales explicativos"
+        ]
+    },
 }
 
 # ==================
