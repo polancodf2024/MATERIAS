@@ -271,30 +271,49 @@ def registrar_alumno(nombre, email, materias):
     if not nombre or not email or not materias:
         st.error("Datos incompletos para el registro")
         return False
-    
+
     remote_path = os.path.join(CONFIG.REMOTE['DIR'], CONFIG.CSV_MATERIAS)
-    csv_content = SSHManager.get_remote_file(remote_path) or "nombre,email,materias,fecha\n"
-    
+    csv_content = SSHManager.get_remote_file(remote_path)
+
+    # Si el archivo no existe o está vacío, crear con encabezados correctos
+    if not csv_content:
+        csv_content = "fecha,nombre,email,materias\n"
+    else:
+        # Asegurarse de que el contenido termina con un salto de línea
+        if not csv_content.endswith('\n'):
+            csv_content += '\n'
+
+        # Verificar y corregir encabezados si es necesario
+        lines = csv_content.splitlines()
+        if lines and not lines[0].startswith("fecha,nombre,email,materias"):
+            csv_content = "fecha,nombre,email,materias\n" + '\n'.join(lines[1:]) + '\n' if len(lines) > 1 else "fecha,nombre,email,materias\n"
+
     # Verificar si el alumno ya existe
-    if email.lower() in [line.split(',')[1].strip().lower() for line in csv_content.splitlines()[1:] if len(line.split(',')) > 1]:
+    lines = csv_content.splitlines()
+    if any(len(line.split(',')) > 2 and email.lower() == line.split(',')[2].strip().lower() for line in lines[1:]):
         st.warning("Este correo electrónico ya está registrado")
         return False
-    
-    # Añadir nuevo registro
-    nuevo_registro = f"{nombre},{email},{','.join(materias)},{datetime.now()}\n"
-    
+
+    # Añadir nuevo registro con formato consistente
+    nuevo_registro = f"{datetime.now()},{nombre},{email},{','.join(materias)}\n"
+
+    # Escribir el contenido actual + nuevo registro
     if not SSHManager.write_remote_file(remote_path, csv_content + nuevo_registro):
         return False
-    
+
     # Registrar en archivos específicos de materias
     for materia in materias:
         materia_file = CONFIG.REMOTE['FILES'].get(materia)
         if materia_file:
             materia_path = os.path.join(CONFIG.REMOTE['DIR'], materia_file)
-            registro = f"{nombre},{email},{datetime.now()}\n"
             current_content = SSHManager.get_remote_file(materia_path) or ""
-            SSHManager.write_remote_file(materia_path, current_content + registro)
-    
+            # Asegurar que el contenido termina con salto de línea
+            if current_content and not current_content.endswith('\n'):
+                current_content += '\n'
+            registro = f"{datetime.now()},{nombre},{email}\n"
+            if not SSHManager.write_remote_file(materia_path, current_content + registro):
+                st.warning(f"No se pudo actualizar el archivo para {materia}")
+
     return True
 
 def enviar_correo(destinatario, asunto, mensaje, adjunto=None):
