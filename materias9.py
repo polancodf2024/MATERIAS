@@ -42,7 +42,8 @@ class Config:
                 'Bioestadística II': st.secrets["remote_bioestadistica2"],
                 'Análisis Multivariado y Multicategórico': st.secrets["remote_categorico"],
                 'Manejo e Interpretación de Datos': st.secrets["remote_manejo"],
-                'Análisis de Experimentos': st.secrets["remote_diseno"]
+                'Análisis de Experimentos': st.secrets["remote_diseno"],
+                'Inteligencia Artificial': st.secrets["remote_inteligencia"]
             }
         }
 
