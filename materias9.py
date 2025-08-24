@@ -340,6 +340,7 @@ def modo_estudiante():
                     if enviar_correo(email, "Confirmación de registro", mensaje):
                         st.success("¡Registro exitoso! Se ha enviado un correo de confirmación")
                         st.balloons()
+                        st.snow()
 
     st.markdown("---")
     st.header("Información de Materias")
