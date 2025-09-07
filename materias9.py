@@ -477,8 +477,14 @@ def modo_profesor():
 
                 status_text.success("¡Material enviado con éxito!")
                 st.balloons()
+                st.snow()
+
+                # Esperar unos segundos para que se vean las animaciones
+                time.sleep(3)
+
                 # Forzar limpieza del formulario después del envío
                 st.rerun()
+
 
 # =============
 # APLICACIÓN
