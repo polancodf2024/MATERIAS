@@ -6,12 +6,15 @@ import os
 from datetime import datetime
 import paramiko
 import time
+import re
+from typing import Optional, List, Dict, Any
 
 # Configuración de la página
 st.set_page_config(
     page_title="Sistema Académico - Evaluación",
     page_icon="📚",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 # ====================
@@ -26,109 +29,189 @@ class Config:
             'PASSWORD': st.secrets["remote_password"],
             'PORT': st.secrets["remote_port"],
             'DIR': st.secrets["remote_dir"],
-            'CALIFICACIONES_FILE': 'calificaciones.csv'
+            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones"]  # Cambiado aquí
         }
+        # Tiempo máximo de espera para conexión (segundos)
+        self.TIMEOUT = 15
+        # Número máximo de reintentos de conexión
+        self.MAX_RETRIES = 2
 
 CONFIG = Config()
+
 
 # ==================
 # FUNCIONES SSH/SFTP
 # ==================
 class SSHManager:
+    _connection_cache = None
+    _last_connection_time = 0
+    _connection_timeout = 300  # 5 minutos para reutilizar conexión
+
     @staticmethod
     def get_connection():
-        """Establece conexión SSH segura"""
+        """Establece conexión SSH segura con caché y reintentos"""
+        current_time = time.time()
+        
+        # Reutilizar conexión si está activa y no ha expirado
+        if (SSHManager._connection_cache and 
+            (current_time - SSHManager._last_connection_time) < SSHManager._connection_timeout):
+            try:
+                # Verificar si la conexión sigue activa
+                SSHManager._connection_cache.exec_command("echo 'Connection test'", timeout=5)
+                return SSHManager._connection_cache
+            except:
+                # Si falla la verificación, cerrar y crear nueva conexión
+                try:
+                    SSHManager._connection_cache.close()
+                except:
+                    pass
+                SSHManager._connection_cache = None
+        
+        # Crear nueva conexión
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            ssh.connect(
-                hostname=CONFIG.REMOTE['HOST'],
-                port=CONFIG.REMOTE['PORT'],
-                username=CONFIG.REMOTE['USER'],
-                password=CONFIG.REMOTE['PASSWORD'],
-                timeout=30
-            )
-            return ssh
-        except Exception as e:
-            st.error(f"Error de conexión SSH: {str(e)}")
-            return None
-
-    @staticmethod
-    def get_remote_file(remote_path):
-        """Lee archivo remoto con manejo de errores"""
-        ssh = SSHManager.get_connection()
-        if not ssh:
-            return None
         
-        try:
-            sftp = ssh.open_sftp()
-            with sftp.file(remote_path, 'r') as f:
-                content = f.read().decode('utf-8')
-            return content
-        except Exception as e:
-            # Si el archivo no existe, retornar contenido vacío
-            if "No such file" in str(e):
-                return ""
-            st.error(f"Error leyendo archivo remoto: {str(e)}")
-            return None
-        finally:
-            ssh.close()
-
-    @staticmethod
-    def write_remote_file(remote_path, content):
-        """Escribe en archivo remoto con manejo de errores"""
-        ssh = SSHManager.get_connection()
-        if not ssh:
-            return False
-        
-        try:
-            sftp = ssh.open_sftp()
-            # Crear directorio si no existe
+        for attempt in range(CONFIG.MAX_RETRIES):
             try:
-                sftp.stat(os.path.dirname(remote_path))
+                ssh.connect(
+                    hostname=CONFIG.REMOTE['HOST'],
+                    port=CONFIG.REMOTE['PORT'],
+                    username=CONFIG.REMOTE['USER'],
+                    password=CONFIG.REMOTE['PASSWORD'],
+                    timeout=CONFIG.TIMEOUT,
+                    banner_timeout=30
+                )
+                SSHManager._connection_cache = ssh
+                SSHManager._last_connection_time = current_time
+                return ssh
+            except Exception as e:
+                if attempt == CONFIG.MAX_RETRIES - 1:
+                    st.error(f"Error de conexión SSH después de {CONFIG.MAX_RETRIES} intentos: {str(e)}")
+                    return None
+                time.sleep(1)  # Esperar antes de reintentar
+
+    @staticmethod
+    def cleanup():
+        """Limpia la conexión caché si existe"""
+        if SSHManager._connection_cache:
+            try:
+                SSHManager._connection_cache.close()
             except:
-                sftp.mkdir(os.path.dirname(remote_path))
+                pass
+            SSHManager._connection_cache = None
+
+    @staticmethod
+    def get_remote_file(remote_path: str) -> Optional[str]:
+        """Lee archivo remoto con manejo de errores y reintentos"""
+        for attempt in range(CONFIG.MAX_RETRIES):
+            ssh = SSHManager.get_connection()
+            if not ssh:
+                if attempt == CONFIG.MAX_RETRIES - 1:
+                    return None
+                continue
+            
+            try:
+                sftp = ssh.open_sftp()
+                with sftp.file(remote_path, 'r') as f:
+                    content = f.read().decode('utf-8')
+                return content
+            except FileNotFoundError:
+                return ""  # Archivo no existe, retornar vacío
+            except Exception as e:
+                if attempt == CONFIG.MAX_RETRIES - 1:
+                    st.error(f"Error leyendo archivo remoto: {str(e)}")
+                    return None
+                # En caso de error, limpiar conexión y reintentar
+                SSHManager.cleanup()
+        return None
+
+    @staticmethod
+    def write_remote_file(remote_path: str, content: str) -> bool:
+        """Escribe en archivo remoto con manejo de errores y reintentos"""
+        for attempt in range(CONFIG.MAX_RETRIES):
+            ssh = SSHManager.get_connection()
+            if not ssh:
+                if attempt == CONFIG.MAX_RETRIES - 1:
+                    return False
+                continue
+            
+            try:
+                sftp = ssh.open_sftp()
                 
-            with sftp.file(remote_path, 'w') as f:
-                f.write(content.encode('utf-8'))
-            return True
-        except Exception as e:
-            st.error(f"Error escribiendo archivo remoto: {str(e)}")
-            return False
-        finally:
-            ssh.close()
+                # Crear directorio si no existe
+                dir_path = os.path.dirname(remote_path)
+                try:
+                    sftp.stat(dir_path)
+                except FileNotFoundError:
+                    # Crear directorio recursivamente
+                    parts = dir_path.split('/')
+                    current_path = ""
+                    for part in parts:
+                        if part:
+                            current_path += '/' + part
+                            try:
+                                sftp.stat(current_path)
+                            except FileNotFoundError:
+                                sftp.mkdir(current_path)
+                
+                # Escribir contenido temporal primero
+                temp_path = remote_path + '.tmp'
+                with sftp.file(temp_path, 'w') as f:
+                    f.write(content.encode('utf-8'))
+                
+                # Reemplazar archivo original
+                try:
+                    sftp.rename(temp_path, remote_path)
+                except:
+                    # Si falla el rename, intentar escribir directamente
+                    with sftp.file(remote_path, 'w') as f:
+                        f.write(content.encode('utf-8'))
+                
+                return True
+            except Exception as e:
+                if attempt == CONFIG.MAX_RETRIES - 1:
+                    st.error(f"Error escribiendo archivo remoto: {str(e)}")
+                    return False
+                # En caso de error, limpiar conexión y reintentar
+                SSHManager.cleanup()
+        return False
 
 # ====================
 # FUNCIONES DE CALIFICACIONES
 # ====================
-def inicializar_archivo_calificaciones():
+def inicializar_archivo_calificaciones() -> bool:
     """Inicializa el archivo CSV si no existe"""
     remote_path = os.path.join(CONFIG.REMOTE['DIR'], CONFIG.REMOTE['CALIFICACIONES_FILE'])
     csv_content = SSHManager.get_remote_file(remote_path)
-    
+
+    if csv_content is None:
+        return False  # Error de conexión
+
     if csv_content == "" or not csv_content.startswith("Fecha,Número Económico,Nombre Completo,Email,Calificación"):
         # Crear nuevo archivo con encabezados
         nuevo_contenido = "Fecha,Número Económico,Nombre Completo,Email,Calificación\n"
         return SSHManager.write_remote_file(remote_path, nuevo_contenido)
     return True
 
-def guardar_calificacion(numero_economico, nombre, email, calificacion):
+def guardar_calificacion(numero_economico: str, nombre: str, email: str, calificacion: int) -> bool:
     """Guarda la calificación en el archivo CSV remoto"""
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nuevo_registro = f"{fecha},{numero_economico},{nombre},{email},{calificacion}\n"
-    
+
     remote_path = os.path.join(CONFIG.REMOTE['DIR'], CONFIG.REMOTE['CALIFICACIONES_FILE'])
     csv_content = SSHManager.get_remote_file(remote_path)
-    
+
     if csv_content is None:
         return False
-    
+
     # Asegurar que el contenido termina con nueva línea
     if csv_content and not csv_content.endswith('\n'):
         csv_content += '\n'
-    
+
     nuevo_contenido = csv_content + nuevo_registro
     return SSHManager.write_remote_file(remote_path, nuevo_contenido)
+
+
 
 # ====================
 # PREGUNTAS DEL EXAMEN
@@ -189,28 +272,174 @@ preguntas = [
 # ====================
 # FUNCIONES DE VALIDACIÓN
 # ====================
-def validate_email(email):
+def validate_email(email: str) -> bool:
     """Valida el formato de un email"""
-    import re
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-def clean_name(name):
+def clean_name(name: str) -> str:
     """Limpia y formatea nombres"""
     if not name:
         return name
     # Elimina caracteres extraños pero conserva acentos y ñ
-    import re
     name = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ\s]', '', name.strip())
     # Formato título (primera letra mayúscula)
     return ' '.join(word.capitalize() for word in name.split())
+
+def validate_student_id(student_id: str) -> bool:
+    """Valida que el número económico tenga un formato básico"""
+    if not student_id:
+        return False
+    # Permite números y letras, mínimo 5 caracteres
+    return bool(re.match(r'^[a-zA-Z0-9]{5,}$', student_id.strip()))
+
+# ====================
+# COMPONENTES DE INTERFAZ
+# ====================
+def show_student_info_form():
+    """Muestra el formulario de información del estudiante"""
+    with st.form("info_estudiante"):
+        st.header("Información del Estudiante")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            numero_economico = st.text_input("Número Económico:", 
+                                           help="Ingresa tu número de cuenta o identificador estudiantil")
+        with col2:
+            email = st.text_input("Email:", 
+                                help="Ingresa tu correo electrónico institucional")
+        
+        nombre_completo = st.text_input("Nombre Completo:", 
+                                      help="Ingresa tu nombre completo como aparece en registros oficiales")
+        
+        submitted_info = st.form_submit_button("Comenzar Examen", use_container_width=True)
+        
+        if submitted_info:
+            errors = []
+            
+            if not numero_economico:
+                errors.append("El número económico es obligatorio")
+            elif not validate_student_id(numero_economico):
+                errors.append("El número económico no tiene un formato válido")
+                
+            if not nombre_completo:
+                errors.append("El nombre completo es obligatorio")
+            elif len(clean_name(nombre_completo).split()) < 2:
+                errors.append("Ingresa al menos nombre y apellido")
+                
+            if not email:
+                errors.append("El email es obligatorio")
+            elif not validate_email(email):
+                errors.append("El formato del email no es válido")
+            
+            if errors:
+                for error in errors:
+                    st.error(error)
+                return None, None, None, False
+            else:
+                return numero_economico, clean_name(nombre_completo), email, True
+        
+        return None, None, None, False
+
+def show_exam_interface():
+    """Muestra la interfaz del examen"""
+    st.header("Examen: Cómo Formular Preguntas a DeepSeek")
+    st.write("Responde las siguientes 5 preguntas seleccionando la opción correcta:")
+    
+    # Usar tabs para organizar las preguntas
+    tabs = st.tabs([f"Pregunta {i+1}" for i in range(len(preguntas))])
+    
+    all_answered = True
+    for i, (tab, pregunta_data) in enumerate(zip(tabs, preguntas)):
+        with tab:
+            st.subheader(pregunta_data["pregunta"])
+            opcion_seleccionada = st.radio(
+                f"Selecciona una opción:",
+                pregunta_data["opciones"],
+                key=f"pregunta_{i}",
+                index=st.session_state.respuestas[i] if st.session_state.respuestas[i] is not None else None
+            )
+            st.session_state.respuestas[i] = opcion_seleccionada
+            
+            if opcion_seleccionada is None:
+                all_answered = False
+                st.warning("⚠️ Esta pregunta aún no ha sido respondida")
+    
+    return all_answered
+
+def show_results(calificacion: int, respuestas_correctas: List[str]):
+    """Muestra los resultados del examen"""
+    st.success(f"✅ Examen completado. Tu calificación es: {calificacion}/5")
+    
+    # Mostrar animaciones
+    if calificacion >= 4:
+        st.balloons()
+    st.snow()
+    
+    # Mostrar respuestas correctas y resultados detallados
+    st.subheader("Detalle de tus respuestas:")
+    
+    resultados_detallados = []
+    for i, pregunta_data in enumerate(preguntas):
+        es_correcta = st.session_state.respuestas[i] == pregunta_data["respuesta_correcta"]
+        resultado = "✓ Correcta" if es_correcta else "✗ Incorrecta"
+        resultados_detallados.append(resultado)
+        
+        with st.expander(f"Pregunta {i+1}: {resultado}"):
+            st.write(f"**Tu respuesta**: {st.session_state.respuestas[i] or 'No respondida'}")
+            st.write(f"**Respuesta correcta**: {pregunta_data['respuesta_correcta']}")
+    
+    # Preparar datos para descarga
+    resultados = {
+        "Pregunta": [pregunta["pregunta"] for pregunta in preguntas],
+        "Tu respuesta": st.session_state.respuestas,
+        "Respuesta correcta": respuestas_correctas,
+        "Resultado": resultados_detallados
+    }
+    
+    df_resultados = pd.DataFrame(resultados)
+    
+    # Opciones de descarga
+    st.subheader("Descargar Resultados")
+    csv_data = df_resultados.to_csv(index=False)
+    
+    st.download_button(
+        label="📥 Descargar evaluación completa",
+        data=csv_data,
+        file_name=f"evaluacion_deepseek_{st.session_state.numero_economico}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+    
+    # Botón para nuevo intento
+    if st.button("Realizar otro examen", use_container_width=True):
+        reset_exam()
+
+def reset_exam():
+    """Reinicia el examen para permitir otro intento"""
+    for key in ['examen_iniciado', 'numero_economico', 'nombre_completo', 'email', 'respuestas']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+def calculate_grade() -> tuple:
+    """Calcula la calificación y prepara los resultados"""
+    calificacion = 0
+    respuestas_correctas = []
+    
+    for i, pregunta_data in enumerate(preguntas):
+        respuestas_correctas.append(pregunta_data["respuesta_correcta"])
+        if st.session_state.respuestas[i] == pregunta_data["respuesta_correcta"]:
+            calificacion += 1
+    
+    return calificacion, respuestas_correctas
 
 # ====================
 # INTERFAZ PRINCIPAL
 # ====================
 def main():
-    st.title("🤖 Evaluación de  la  Semana 1")
-#    st.write("Este examen evalúa tu comprensión sobre el tema estudiado y te dará cómo formular preguntas efectivas para obtener mejores respuestas de DeepSeek.")
+    st.title("🤖 Evaluación de la Semana 1")
     
     # Inicializar el archivo de calificaciones
     if not inicializar_archivo_calificaciones():
@@ -223,67 +452,55 @@ def main():
     if 'respuestas' not in st.session_state:
         st.session_state.respuestas = [None] * len(preguntas)
     
-    # Sección de información del estudiante
-    with st.form("info_estudiante"):
-        st.header("Información del Estudiante")
-        numero_economico = st.text_input("Número Económico:")
-        nombre_completo = st.text_input("Nombre Completo:")
-        email = st.text_input("Email:")
-        
-        submitted_info = st.form_submit_button("Comenzar Examen")
-    
-    # Si se ha enviado la información del estudiante, mostrar el examen
-    if submitted_info:
-        if not numero_economico or not nombre_completo or not email:
-            st.error("Por favor, completa todos los campos.")
+    # Mostrar estado de conexión
+    with st.sidebar:
+        st.header("Estado del Sistema")
+        if SSHManager.get_connection():
+            st.success("✅ Conectado al servidor")
         else:
-            # Validar email
-            if not validate_email(email):
-                st.error("Por favor ingresa un correo electrónico válido")
-            else:
-                # Guardar información del estudiante en sesión
-                st.session_state.numero_economico = numero_economico
-                st.session_state.nombre_completo = clean_name(nombre_completo)
-                st.session_state.email = email
-                st.session_state.examen_iniciado = True
-                st.session_state.respuestas = [None] * len(preguntas)
-                st.rerun()
-    
-    # Mostrar el examen si ha sido iniciado
-    if st.session_state.get('examen_iniciado', False):
-        st.header("Examen: Cómo Formular Preguntas a DeepSeek")
-        st.write("Responde las siguientes 5 preguntas seleccionando la opción correcta:")
+            st.error("❌ Error de conexión")
         
-        # Mostrar preguntas
-        for i, pregunta_data in enumerate(preguntas):
-            st.subheader(pregunta_data["pregunta"])
-            opcion_seleccionada = st.radio(
-                f"Selecciona una opción para la pregunta {i+1}:",
-                pregunta_data["opciones"],
-                key=f"pregunta_{i}",
-                index=None
-            )
-            st.session_state.respuestas[i] = opcion_seleccionada
-            st.write("---")
+        st.info(f"Preguntas: {len(preguntas)}")
+        if st.session_state.examen_iniciado:
+            respuestas_contestadas = sum(1 for r in st.session_state.respuestas if r is not None)
+            st.info(f"Progreso: {respuestas_contestadas}/{len(preguntas)}")
+    
+    # Flujo principal de la aplicación
+    if not st.session_state.examen_iniciado:
+        # Sección de información del estudiante
+        numero_economico, nombre_completo, email, info_valida = show_student_info_form()
+        
+        if info_valida:
+            # Guardar información del estudiante en sesión
+            st.session_state.numero_economico = numero_economico
+            st.session_state.nombre_completo = nombre_completo
+            st.session_state.email = email
+            st.session_state.examen_iniciado = True
+            st.session_state.respuestas = [None] * len(preguntas)
+            st.rerun()
+    else:
+        # Mostrar información del estudiante actual
+        st.sidebar.write("---")
+        st.sidebar.subheader("Estudiante:")
+        st.sidebar.write(f"**Nombre**: {st.session_state.nombre_completo}")
+        st.sidebar.write(f"**Número Económico**: {st.session_state.numero_economico}")
+        st.sidebar.write(f"**Email**: {st.session_state.email}")
+        
+        # Mostrar el examen
+        all_answered = show_exam_interface()
         
         # Botón para enviar respuestas
-        if st.button("Enviar Examen", type="primary"):
-            # Verificar que todas las preguntas han sido respondidas
-            if None in st.session_state.respuestas:
-                st.error("Por favor, responde todas las preguntas antes de enviar el examen.")
-            else:
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            if st.button("Reiniciar Examen", type="secondary"):
+                reset_exam()
+                return
+        
+        with col2:
+            if st.button("Enviar Examen", type="primary", disabled=not all_answered):
                 # Calificar examen
-                calificacion = 0
-                respuestas_correctas = []
-                resultados_detallados = []
-                
-                for i, pregunta_data in enumerate(preguntas):
-                    if st.session_state.respuestas[i] == pregunta_data["respuesta_correcta"]:
-                        calificacion += 1
-                        resultados_detallados.append("✓ Correcta")
-                    else:
-                        resultados_detallados.append("✗ Incorrecta")
-                    respuestas_correctas.append(pregunta_data["respuesta_correcta"])
+                calificacion, respuestas_correctas = calculate_grade()
                 
                 # Guardar calificación
                 if guardar_calificacion(
@@ -292,43 +509,14 @@ def main():
                     st.session_state.email,
                     calificacion
                 ):
-                    # Mostrar resultados
-                    st.success(f"✅ Examen completado. Tu calificación es: {calificacion}/5")
-                    
-                    # Mostrar animaciones
-                    st.balloons()
-                    st.snow()
-                    
-                    # Mostrar respuestas correctas y resultados detallados
-                    st.subheader("Detalle de tus respuestas:")
-                    for i, (correcta, resultado) in enumerate(zip(respuestas_correctas, resultados_detallados)):
-                        st.write(f"**Pregunta {i+1}**: {resultado}")
-                        st.write(f"**Tu respuesta**: {st.session_state.respuestas[i]}")
-                        st.write(f"**Respuesta correcta**: {correcta}")
-                        st.write("---")
-                    
-                    # Preparar datos para descarga
-                    resultados = {
-                        "Pregunta": [pregunta["pregunta"] for pregunta in preguntas],
-                        "Tu respuesta": st.session_state.respuestas,
-                        "Respuesta correcta": respuestas_correctas,
-                        "Resultado": resultados_detallados
-                    }
-                    
-                    df_resultados = pd.DataFrame(resultados)
-                    
-                    # Opciones de descarga
-                    st.subheader("Descargar Resultados")
-                    csv_data = df_resultados.to_csv(index=False)
-                    
-                    st.download_button(
-                        label="📥 Descargar preguntas y evaluación",
-                        data=csv_data,
-                        file_name=f"evaluacion_deepseek_{st.session_state.numero_economico}.csv",
-                        mime="text/csv"
-                    )
+                    show_results(calificacion, respuestas_correctas)
                 else:
                     st.error("Error al guardar la calificación. Contacta al administrador: polanco@unam.mx.")
 
-if __name__ == "__main__":
-    main()
+# Manejo de limpieza al finalizar
+try:
+    if __name__ == "__main__":
+        main()
+finally:
+    # Limpiar conexiones SSH al finalizar
+    SSHManager.cleanup()
