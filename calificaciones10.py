@@ -354,11 +354,20 @@ def show_exam_interface():
     for i, (tab, pregunta_data) in enumerate(zip(tabs, preguntas)):
         with tab:
             st.subheader(pregunta_data["pregunta"])
+            
+            # Obtener el índice de la opción seleccionada previamente
+            selected_index = None
+            if st.session_state.respuestas[i] is not None:
+                try:
+                    selected_index = pregunta_data["opciones"].index(st.session_state.respuestas[i])
+                except ValueError:
+                    selected_index = None
+            
             opcion_seleccionada = st.radio(
                 f"Selecciona una opción:",
                 pregunta_data["opciones"],
                 key=f"pregunta_{i}",
-                index=st.session_state.respuestas[i] if st.session_state.respuestas[i] is not None else None
+                index=selected_index
             )
             st.session_state.respuestas[i] = opcion_seleccionada
             
@@ -371,25 +380,25 @@ def show_exam_interface():
 def show_results(calificacion: int, respuestas_correctas: List[str]):
     """Muestra los resultados del examen"""
     st.success(f"✅ Examen completado. Tu calificación es: {calificacion}/5")
-    
+
     # Mostrar animaciones
     if calificacion >= 4:
         st.balloons()
     st.snow()
-    
+
     # Mostrar respuestas correctas y resultados detallados
     st.subheader("Detalle de tus respuestas:")
-    
+
     resultados_detallados = []
     for i, pregunta_data in enumerate(preguntas):
         es_correcta = st.session_state.respuestas[i] == pregunta_data["respuesta_correcta"]
         resultado = "✓ Correcta" if es_correcta else "✗ Incorrecta"
         resultados_detallados.append(resultado)
-        
+
         with st.expander(f"Pregunta {i+1}: {resultado}"):
             st.write(f"**Tu respuesta**: {st.session_state.respuestas[i] or 'No respondida'}")
             st.write(f"**Respuesta correcta**: {pregunta_data['respuesta_correcta']}")
-    
+
     # Preparar datos para descarga
     resultados = {
         "Pregunta": [pregunta["pregunta"] for pregunta in preguntas],
@@ -397,13 +406,13 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
         "Respuesta correcta": respuestas_correctas,
         "Resultado": resultados_detallados
     }
-    
+
     df_resultados = pd.DataFrame(resultados)
-    
+
     # Opciones de descarga
     st.subheader("Descargar Resultados")
     csv_data = df_resultados.to_csv(index=False)
-    
+
     st.download_button(
         label="📥 Descargar evaluación completa",
         data=csv_data,
@@ -411,10 +420,6 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
         mime="text/csv",
         use_container_width=True
     )
-    
-    # Botón para nuevo intento
-    if st.button("Realizar otro examen", use_container_width=True):
-        reset_exam()
 
 def reset_exam():
     """Reinicia el examen para permitir otro intento"""
