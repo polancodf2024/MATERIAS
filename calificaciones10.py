@@ -8,6 +8,10 @@ import paramiko
 import time
 import re
 from typing import Optional, List, Dict, Any
+import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Configuración de la página
 st.set_page_config(
@@ -29,8 +33,24 @@ class Config:
             'PASSWORD': st.secrets["remote_password"],
             'PORT': st.secrets["remote_port"],
             'DIR': st.secrets["remote_dir"],
-            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones"]  # Cambiado aquí
+            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones"]
         }
+        
+        # Configuración para envío de correos (usando los nombres correctos de tus secrets)
+        self.EMAIL_CONFIGURED = False
+        try:
+            self.EMAIL = {
+                'SMTP_SERVER': st.secrets["smtp_server"],
+                'SMTP_PORT': st.secrets["smtp_port"],
+                'SENDER_EMAIL': st.secrets["email_user"],
+                'SENDER_PASSWORD': st.secrets["email_password"],
+                'ADMIN_EMAIL': st.secrets["notification_email"]
+            }
+            self.EMAIL_CONFIGURED = True
+        except KeyError as e:
+            st.warning(f"⚠️ Configuración de correo incompleta: {e}. El envío de correos estará deshabilitado.")
+            self.EMAIL = {}
+        
         # Tiempo máximo de espera para conexión (segundos)
         self.TIMEOUT = 15
         # Número máximo de reintentos de conexión
@@ -42,32 +62,69 @@ CONFIG = Config()
 # ==================
 # FUNCIONES SSH/SFTP
 # ==================
-class SSHManager:
-    _connection_cache = None
-    _last_connection_time = 0
-    _connection_timeout = 300  # 5 minutos para reutilizar conexión
-
-    @staticmethod
-    def get_connection():
-        """Establece conexión SSH segura con caché y reintentos"""
-        current_time = time.time()
-        
-        # Reutilizar conexión si está activa y no ha expirado
-        if (SSHManager._connection_cache and 
-            (current_time - SSHManager._last_connection_time) < SSHManager._connection_timeout):
-            try:
-                # Verificar si la conexión sigue activa
-                SSHManager._connection_cache.exec_command("echo 'Connection test'", timeout=5)
-                return SSHManager._connection_cache
-            except:
-                # Si falla la verificación, cerrar y crear nueva conexión
+class SSHConnectionPool:
+    """Pool de conexiones SSH para manejar múltiples usuarios simultáneos"""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(SSHConnectionPool, cls).__new__(cls)
+                cls._instance._initialize()
+            return cls._instance
+    
+    def _initialize(self):
+        self.available_connections = []
+        self.in_use_connections = []
+        self.max_connections = 10  # Máximo de conexiones simultáneas
+        self.connection_timeout = 300  # 5 minutos para reutilizar conexión
+    
+    def get_connection(self):
+        """Obtiene una conexión del pool"""
+        with self._lock:
+            current_time = time.time()
+            
+            # Limpiar conexiones expiradas
+            self.available_connections = [
+                conn for conn in self.available_connections
+                if (current_time - conn['last_used']) < self.connection_timeout
+            ]
+            
+            # Reutilizar conexión disponible
+            while self.available_connections:
+                conn_data = self.available_connections.pop()
+                ssh = conn_data['ssh']
+                
                 try:
-                    SSHManager._connection_cache.close()
+                    # Verificar si la conexión sigue activa
+                    ssh.exec_command("echo 'Connection test'", timeout=5)
+                    self.in_use_connections.append({
+                        'ssh': ssh,
+                        'last_used': current_time
+                    })
+                    return ssh
                 except:
-                    pass
-                SSHManager._connection_cache = None
-        
-        # Crear nueva conexión
+                    try:
+                        ssh.close()
+                    except:
+                        pass
+                    continue
+            
+            # Crear nueva conexión si no hay disponibles y no excedemos el límite
+            if len(self.in_use_connections) < self.max_connections:
+                ssh = self._create_new_connection()
+                if ssh:
+                    self.in_use_connections.append({
+                        'ssh': ssh,
+                        'last_used': current_time
+                    })
+                    return ssh
+            
+            return None
+    
+    def _create_new_connection(self):
+        """Crea una nueva conexión SSH"""
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         
@@ -81,24 +138,111 @@ class SSHManager:
                     timeout=CONFIG.TIMEOUT,
                     banner_timeout=30
                 )
-                SSHManager._connection_cache = ssh
-                SSHManager._last_connection_time = current_time
                 return ssh
             except Exception as e:
                 if attempt == CONFIG.MAX_RETRIES - 1:
                     st.error(f"Error de conexión SSH después de {CONFIG.MAX_RETRIES} intentos: {str(e)}")
                     return None
-                time.sleep(1)  # Esperar antes de reintentar
+                time.sleep(1)
+    
+    def return_connection(self, ssh):
+        """Devuelve una conexión al pool"""
+        with self._lock:
+            # Encontrar y remover de in_use_connections
+            self.in_use_connections = [
+                conn for conn in self.in_use_connections
+                if conn['ssh'] != ssh
+            ]
+            
+            # Verificar que la conexión aún esté activa antes de devolverla al pool
+            try:
+                ssh.exec_command("echo 'Connection test'", timeout=5)
+                self.available_connections.append({
+                    'ssh': ssh,
+                    'last_used': time.time()
+                })
+            except:
+                try:
+                    ssh.close()
+                except:
+                    pass
+    
+    def cleanup(self):
+        """Limpia todas las conexiones"""
+        with self._lock:
+            for conn_data in self.available_connections + self.in_use_connections:
+                try:
+                    conn_data['ssh'].close()
+                except:
+                    pass
+            self.available_connections = []
+            self.in_use_connections = []
+
+
+class SSHManager:
+    _connection_pool = SSHConnectionPool()
+    _file_lock_timeout = 30  # 30 segundos máximo para esperar un lock
+
+    @staticmethod
+    def get_connection():
+        """Obtiene una conexión del pool"""
+        return SSHManager._connection_pool.get_connection()
+
+    @staticmethod
+    def return_connection(ssh):
+        """Devuelve una conexión al pool"""
+        SSHManager._connection_pool.return_connection(ssh)
 
     @staticmethod
     def cleanup():
-        """Limpia la conexión caché si existe"""
-        if SSHManager._connection_cache:
+        """Limpia todas las conexiones del pool"""
+        SSHManager._connection_pool.cleanup()
+
+    @staticmethod
+    def _acquire_file_lock(remote_path: str, sftp) -> bool:
+        """Adquiere un lock para el archivo usando archivo .lock"""
+        lock_path = remote_path + '.lock'
+        max_attempts = 10
+        attempt = 0
+        
+        while attempt < max_attempts:
             try:
-                SSHManager._connection_cache.close()
-            except:
-                pass
-            SSHManager._connection_cache = None
+                # Intentar crear el archivo lock
+                try:
+                    sftp.stat(lock_path)
+                    # Lock existe, esperar
+                    time.sleep(0.5)
+                    attempt += 1
+                    continue
+                except FileNotFoundError:
+                    # Lock no existe, crearlo
+                    try:
+                        with sftp.file(lock_path, 'w') as f:
+                            f.write(f"locked_{datetime.now().isoformat()}")
+                        # Verificar que somos los dueños del lock
+                        time.sleep(0.1)
+                        try:
+                            sftp.stat(lock_path)
+                            return True
+                        except FileNotFoundError:
+                            # Alguien más creó el lock
+                            continue
+                    except:
+                        continue
+            except Exception:
+                attempt += 1
+                time.sleep(0.5)
+        
+        return False
+
+    @staticmethod
+    def _release_file_lock(remote_path: str, sftp):
+        """Libera el lock del archivo"""
+        lock_path = remote_path + '.lock'
+        try:
+            sftp.remove(lock_path)
+        except:
+            pass  # Ignorar errores al liberar lock
 
     @staticmethod
     def get_remote_file(remote_path: str) -> Optional[str]:
@@ -112,17 +256,34 @@ class SSHManager:
             
             try:
                 sftp = ssh.open_sftp()
-                with sftp.file(remote_path, 'r') as f:
-                    content = f.read().decode('utf-8')
-                return content
+                
+                # Adquirir lock antes de leer
+                if not SSHManager._acquire_file_lock(remote_path, sftp):
+                    st.warning("Esperando acceso al archivo...")
+                    if attempt == CONFIG.MAX_RETRIES - 1:
+                        SSHManager.return_connection(ssh)
+                        return None
+                    continue
+                
+                try:
+                    with sftp.file(remote_path, 'r') as f:
+                        content = f.read().decode('utf-8')
+                    return content
+                finally:
+                    # Liberar lock después de leer
+                    SSHManager._release_file_lock(remote_path, sftp)
+                    
             except FileNotFoundError:
+                SSHManager._release_file_lock(remote_path, sftp)
                 return ""  # Archivo no existe, retornar vacío
             except Exception as e:
+                SSHManager._release_file_lock(remote_path, sftp)
                 if attempt == CONFIG.MAX_RETRIES - 1:
                     st.error(f"Error leyendo archivo remoto: {str(e)}")
                     return None
-                # En caso de error, limpiar conexión y reintentar
-                SSHManager.cleanup()
+                # En caso de error, reintentar
+            finally:
+                SSHManager.return_connection(ssh)
         return None
 
     @staticmethod
@@ -138,43 +299,206 @@ class SSHManager:
             try:
                 sftp = ssh.open_sftp()
                 
-                # Crear directorio si no existe
-                dir_path = os.path.dirname(remote_path)
-                try:
-                    sftp.stat(dir_path)
-                except FileNotFoundError:
-                    # Crear directorio recursivamente
-                    parts = dir_path.split('/')
-                    current_path = ""
-                    for part in parts:
-                        if part:
-                            current_path += '/' + part
-                            try:
-                                sftp.stat(current_path)
-                            except FileNotFoundError:
-                                sftp.mkdir(current_path)
+                # Adquirir lock antes de escribir
+                if not SSHManager._acquire_file_lock(remote_path, sftp):
+                    st.warning("Esperando acceso al archivo...")
+                    if attempt == CONFIG.MAX_RETRIES - 1:
+                        SSHManager.return_connection(ssh)
+                        return False
+                    continue
                 
-                # Escribir contenido temporal primero
-                temp_path = remote_path + '.tmp'
-                with sftp.file(temp_path, 'w') as f:
-                    f.write(content.encode('utf-8'))
-                
-                # Reemplazar archivo original
                 try:
-                    sftp.rename(temp_path, remote_path)
-                except:
-                    # Si falla el rename, intentar escribir directamente
-                    with sftp.file(remote_path, 'w') as f:
+                    # Crear directorio si no existe
+                    dir_path = os.path.dirname(remote_path)
+                    try:
+                        sftp.stat(dir_path)
+                    except FileNotFoundError:
+                        # Crear directorio recursivamente
+                        parts = dir_path.split('/')
+                        current_path = ""
+                        for part in parts:
+                            if part:
+                                current_path += '/' + part
+                                try:
+                                    sftp.stat(current_path)
+                                except FileNotFoundError:
+                                    sftp.mkdir(current_path)
+                    
+                    # Escribir contenido temporal primero
+                    temp_path = remote_path + '.tmp'
+                    with sftp.file(temp_path, 'w') as f:
                         f.write(content.encode('utf-8'))
-                
-                return True
+                    
+                    # Reemplazar archivo original
+                    try:
+                        sftp.rename(temp_path, remote_path)
+                    except:
+                        # Si falla el rename, intentar escribir directamente
+                        with sftp.file(remote_path, 'w') as f:
+                            f.write(content.encode('utf-8'))
+                    
+                    return True
+                finally:
+                    # Liberar lock después de escribir
+                    SSHManager._release_file_lock(remote_path, sftp)
+                    
             except Exception as e:
+                SSHManager._release_file_lock(remote_path, sftp)
                 if attempt == CONFIG.MAX_RETRIES - 1:
                     st.error(f"Error escribiendo archivo remoto: {str(e)}")
                     return False
-                # En caso de error, limpiar conexión y reintentar
-                SSHManager.cleanup()
+            finally:
+                SSHManager.return_connection(ssh)
         return False
+
+# ====================
+# FUNCIONES DE CORREO
+# ====================
+class EmailManager:
+    @staticmethod
+    def enviar_correo_resultados(destinatario: str, nombre_estudiante: str, numero_economico: str, 
+                               calificacion: int, respuestas_detalladas: List[Dict]) -> bool:
+        """
+        Envía un correo con los resultados de la evaluación al estudiante
+        """
+        if not CONFIG.EMAIL_CONFIGURED:
+            return False
+            
+        try:
+            # Configurar el mensaje
+            mensaje = MIMEMultipart()
+            mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
+            mensaje['To'] = destinatario
+            mensaje['Subject'] = f"📊 Resultados de Evaluación - DeepSeek Week 1 - {nombre_estudiante}"
+            
+            # Crear contenido del correo
+            cuerpo = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+                    <h2 style="color: #2c3e50; text-align: center;">📚 Evaluación de la Semana 1</h2>
+                    <h3 style="color: #34495e;">Resultados de tu evaluación</h3>
+                    
+                    <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
+                        <p><strong>Número Económico:</strong> {numero_economico}</p>
+                        <p><strong>Email:</strong> {destinatario}</p>
+                        <p><strong>Fecha de Evaluación:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M')}</p>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 20px 0;">
+                        <h2 style="color: {'#27ae60' if calificacion >= 4 else '#e74c3c'};">
+                            Calificación Final: {calificacion}/5
+                        </h2>
+                        <p style="font-size: 18px;">
+                            {'✅ ¡Felicidades! Has aprobado la evaluación.' if calificacion >= 4 else '📝 Sigue practicando para mejorar.'}
+                        </p>
+                    </div>
+                    
+                    <h4 style="color: #34495e;">Detalle de tus respuestas:</h4>
+                    <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+                        <tr style="background-color: #34495e; color: white;">
+                            <th style="padding: 10px; text-align: left;">Pregunta</th>
+                            <th style="padding: 10px; text-align: center;">Resultado</th>
+                        </tr>
+            """
+            
+            # Agregar detalles de cada pregunta
+            for i, resultado in enumerate(respuestas_detalladas, 1):
+                color = "#27ae60" if resultado['correcta'] else "#e74c3c"
+                icono = "✅" if resultado['correcta'] else "❌"
+                
+                cuerpo += f"""
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 10px;">Pregunta {i}</td>
+                            <td style="padding: 10px; text-align: center; color: {color};">
+                                {icono} {resultado['resultado']}
+                            </td>
+                        </tr>
+                """
+            
+            # Cierre del correo
+            cuerpo += f"""
+                    </table>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background-color: #e8f4fd; border-radius: 5px;">
+                        <p><strong>Información importante:</strong></p>
+                        <ul>
+                            <li>Este correo es una confirmación de que tu evaluación ha sido registrada en el sistema.</li>
+                            <li>Guarda este correo como comprobante de tu participación.</li>
+                            <li>Para cualquier duda o aclaración, contacta al administrador: {CONFIG.EMAIL['ADMIN_EMAIL']}</li>
+                        </ul>
+                    </div>
+                    
+                    <div style="margin-top: 20px; text-align: center; color: #7f8c8d; font-size: 12px;">
+                        <p>Sistema Académico de Evaluación - DeepSeek Week 1<br>
+                        Universidad Nacional Autónoma de México</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Adjuntar el cuerpo del mensaje
+            mensaje.attach(MIMEText(cuerpo, 'html'))
+            
+            # Conectar al servidor SMTP y enviar
+            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
+                server.starttls()  # Seguridad TLS
+                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
+                server.send_message(mensaje)
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error al enviar correo: {str(e)}")
+            return False
+
+    @staticmethod
+    def enviar_correo_administrador(nombre_estudiante: str, numero_economico: str, 
+                                  calificacion: int, email_estudiante: str) -> bool:
+        """
+        Envía un correo de notificación al administrador
+        """
+        if not CONFIG.EMAIL_CONFIGURED:
+            return False
+            
+        try:
+            mensaje = MIMEMultipart()
+            mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
+            mensaje['To'] = CONFIG.EMAIL['ADMIN_EMAIL']
+            mensaje['Subject'] = f"📋 Nueva Evaluación Registrada - {nombre_estudiante}"
+            
+            cuerpo = f"""
+            <html>
+            <body>
+                <h2>Nueva Evaluación Registrada en el Sistema</h2>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
+                    <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
+                    <p><strong>Número Económico:</strong> {numero_economico}</p>
+                    <p><strong>Email del estudiante:</strong> {email_estudiante}</p>
+                    <p><strong>Calificación:</strong> {calificacion}/5</p>
+                    <p><strong>Fecha y Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+                </div>
+                
+                <p>Los datos han sido guardados en el archivo central de calificaciones.</p>
+            </body>
+            </html>
+            """
+            
+            mensaje.attach(MIMEText(cuerpo, 'html'))
+            
+            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
+                server.starttls()
+                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
+                server.send_message(mensaje)
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error al enviar correo al administrador: {str(e)}")
+            return False
 
 # ====================
 # FUNCIONES DE CALIFICACIONES
@@ -194,7 +518,7 @@ def inicializar_archivo_calificaciones() -> bool:
     return True
 
 def guardar_calificacion(numero_economico: str, nombre: str, email: str, calificacion: int) -> bool:
-    """Guarda la calificación en el archivo CSV remoto"""
+    """Guarda la calificación en el archivo CSV remoto con lock"""
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nuevo_registro = f"{fecha},{numero_economico},{nombre},{email},{calificacion}\n"
 
@@ -390,14 +714,54 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
     st.subheader("Detalle de tus respuestas:")
 
     resultados_detallados = []
+    respuestas_para_correo = []
+    
     for i, pregunta_data in enumerate(preguntas):
         es_correcta = st.session_state.respuestas[i] == pregunta_data["respuesta_correcta"]
         resultado = "✓ Correcta" if es_correcta else "✗ Incorrecta"
         resultados_detallados.append(resultado)
+        
+        # Preparar datos para el correo
+        respuestas_para_correo.append({
+            'correcta': es_correcta,
+            'resultado': resultado,
+            'respuesta_usuario': st.session_state.respuestas[i] or 'No respondida',
+            'respuesta_correcta': pregunta_data["respuesta_correcta"]
+        })
 
         with st.expander(f"Pregunta {i+1}: {resultado}"):
             st.write(f"**Tu respuesta**: {st.session_state.respuestas[i] or 'No respondida'}")
             st.write(f"**Respuesta correcta**: {pregunta_data['respuesta_correcta']}")
+
+    # Envío de correos (solo si está configurado)
+    if CONFIG.EMAIL_CONFIGURED:
+        with st.spinner("Enviando resultados por correo..."):
+            # Enviar correo al estudiante
+            correo_enviado = EmailManager.enviar_correo_resultados(
+                destinatario=st.session_state.email,
+                nombre_estudiante=st.session_state.nombre_completo,
+                numero_economico=st.session_state.numero_economico,
+                calificacion=calificacion,
+                respuestas_detalladas=respuestas_para_correo
+            )
+            
+            # Enviar notificación al administrador
+            notificacion_enviada = EmailManager.enviar_correo_administrador(
+                nombre_estudiante=st.session_state.nombre_completo,
+                numero_economico=st.session_state.numero_economico,
+                calificacion=calificacion,
+                email_estudiante=st.session_state.email
+            )
+            
+            if correo_enviado:
+                st.success(f"📧 Se ha enviado un correo con tus resultados a: {st.session_state.email}")
+            else:
+                st.warning("⚠️ No se pudo enviar el correo con los resultados, pero tu evaluación ha sido guardada.")
+                
+            if notificacion_enviada:
+                st.info("📋 Se ha notificado al administrador sobre tu evaluación.")
+    else:
+        st.info("ℹ️ La funcionalidad de correo no está configurada. Tu evaluación ha sido guardada correctamente.")
 
     # Preparar datos para descarga
     resultados = {
@@ -446,6 +810,10 @@ def calculate_grade() -> tuple:
 def main():
     st.title("🤖 Evaluación de la Semana 1")
     
+    # Mostrar estado de configuración de correo
+    if not CONFIG.EMAIL_CONFIGURED:
+        st.warning("⚠️ La funcionalidad de correo no está configurada. Los resultados se guardarán pero no se enviarán por correo.")
+    
     # Inicializar el archivo de calificaciones
     if not inicializar_archivo_calificaciones():
         st.error("No se pudo inicializar el archivo de calificaciones. Contacta al administrador: polanco@unam.mx.")
@@ -460,8 +828,10 @@ def main():
     # Mostrar estado de conexión
     with st.sidebar:
         st.header("Estado del Sistema")
-        if SSHManager.get_connection():
+        ssh = SSHManager.get_connection()
+        if ssh:
             st.success("✅ Conectado al servidor")
+            SSHManager.return_connection(ssh)
         else:
             st.error("❌ Error de conexión")
         
