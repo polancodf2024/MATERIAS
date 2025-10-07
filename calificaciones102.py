@@ -812,7 +812,7 @@ def calculate_grade() -> tuple:
 # INTERFAZ PRINCIPAL
 # ====================
 def main():
-    st.title("🤖 Evaluación de la Semana 1")
+    st.title("🤖 Evaluación de la Semana 2")
     
     # Mostrar estado de configuración de correo
     if not CONFIG.EMAIL_CONFIGURED:
