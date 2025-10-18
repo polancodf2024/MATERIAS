@@ -376,7 +376,7 @@ class EmailManager:
             <html>
             <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-                    <h2 style="color: #2c3e50; text-align: center;">📚 Evaluación de la Semana 2</h2>
+                    <h2 style="color: #2c3e50; text-align: center;">📚 Evaluación de la Semana 3</h2>
                     <h3 style="color: #34495e;">Resultados de tu evaluación</h3>
                     
                     <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
@@ -812,7 +812,7 @@ def calculate_grade() -> tuple:
 # INTERFAZ PRINCIPAL
 # ====================
 def main():
-    st.title("🤖 Evaluación de la Semana 2")
+    st.title("🤖 Evaluación de la Semana 3")
     
     # Mostrar estado de configuración de correo
     if not CONFIG.EMAIL_CONFIGURED:
