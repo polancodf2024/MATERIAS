@@ -33,7 +33,7 @@ class Config:
             'PASSWORD': st.secrets["remote_password"],
             'PORT': st.secrets["remote_port"],
             'DIR': st.secrets["remote_dir"],
-            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones2"]
+            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones3"]
         }
         
         # Configuración para envío de correos (usando los nombres correctos de tus secrets)
