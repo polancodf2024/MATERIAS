@@ -70,7 +70,78 @@ def clean_name(name):
 # DATOS DE LAS MATERIAS
 # ===================
 TEMARIOS = {
-    # ... (mantener igual que en el original)
+    'Cálculo Diferencial e Integral III': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Cálculo Diferencial e Integral IV': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Estadística no Paramétrica': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Bioestadística I': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Bioestadística II': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Análisis Multivariado y Multicategórico': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Manejo e Interpretación de Datos': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Análisis de Experimentos': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Inteligencia Artificial': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    }
 }
 
 # ==================
@@ -127,6 +198,31 @@ class SSHManager:
             return True
         except Exception as e:
             st.error(f"Error escribiendo archivo remoto: {str(e)}")
+            return False
+        finally:
+            ssh.close()
+
+    @staticmethod
+    def append_to_remote_file(remote_path, content):
+        """Añade contenido a un archivo remoto existente"""
+        ssh = SSHManager.get_connection()
+        if not ssh:
+            return False
+        
+        try:
+            sftp = ssh.open_sftp()
+            # Leer contenido existente
+            try:
+                existing_content = sftp.file(remote_path, 'r').read().decode('utf-8')
+            except:
+                existing_content = ""
+            
+            # Escribir contenido completo
+            with sftp.file(remote_path, 'w') as f:
+                f.write((existing_content + content).encode('utf-8'))
+            return True
+        except Exception as e:
+            st.error(f"Error añadiendo a archivo remoto: {str(e)}")
             return False
         finally:
             ssh.close()
@@ -241,9 +337,13 @@ def registrar_alumno(nombre, email, materias):
             elif not current_content.endswith('\n'):
                 current_content += '\n'
                 
-            registro = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{nombre},{email}\n"
-            if not SSHManager.write_remote_file(materia_path, current_content + registro):
-                st.warning(f"No se pudo actualizar el archivo para {materia}")
+            # Verificar si el alumno ya está en este archivo específico
+            if email not in current_content:
+                registro = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{nombre},{email}\n"
+                if not SSHManager.write_remote_file(materia_path, current_content + registro):
+                    st.warning(f"No se pudo actualizar el archivo para {materia}")
+            else:
+                st.info(f"El alumno ya estaba registrado en {materia}")
 
     return True
 
@@ -289,18 +389,25 @@ def enviar_correo(destinatario, asunto, mensaje, adjunto=None):
 def mostrar_temario(materia):
     """Muestra el temario de una materia con formato"""
     if materia not in TEMARIOS:
-        st.warning("Temario no disponible para esta materia")
+        st.warning("Información no disponible para esta materia")
         return
 
-    st.subheader(f"Temario de {materia}")
+    st.subheader(f"Información de {materia}")
 
-    with st.expander("Contenido del curso", expanded=True):
+    with st.expander("📚 Contenido del curso", expanded=True):
+        st.info("⏳ Temario pendiente de subir por el departamento académico")
         for item in TEMARIOS[materia]['contenido']:
-            st.write(f"- {item}")
+            st.write(f"• {item}")
 
-    with st.expander("Sistema de evaluación", expanded=False):
+    with st.expander("📊 Sistema de evaluación", expanded=False):
+        st.warning("⏳ Sistema de evaluación pendiente de definir")
         for item in TEMARIOS[materia]['evaluacion']:
-            st.write(f"- {item}")
+            st.write(f"• {item}")
+
+    st.info("""
+    **Nota:** La información completa del curso (temario detallado y sistema de evaluación) 
+    será proporcionada por el departamento académico antes del inicio de clases.
+    """)
 
 def modo_estudiante():
     """Interfaz para el modo estudiante"""
@@ -335,7 +442,7 @@ def modo_estudiante():
                     Recibirás material y notificaciones en este correo.
 
                     Saludos,
-                    Departamento Académico
+                    Carlos Polanco
                     """
                     if enviar_correo(email, "Confirmación de registro", mensaje):
                         st.success("¡Registro exitoso! Se ha enviado un correo de confirmación")
@@ -346,7 +453,7 @@ def modo_estudiante():
     st.header("Información de Materias")
 
     materia_seleccionada = st.selectbox(
-        "Selecciona una materia para ver su temario",
+        "Selecciona una materia para ver su información",
         options=list(CONFIG.REMOTE['FILES'].keys()),
         index=0
     )
@@ -457,25 +564,44 @@ def modo_profesor():
                 # Progreso del envío
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                success_count = 0
+                total_alumnos = len(alumnos)
+
+                # Envío en grupos con pausas para evitar bloqueos de Gmail
+                grupo_size = 5  # Enviar 5 correos por lote
+                pausa_entre_grupos = 10  # 10 segundos entre lotes
+                pausa_entre_correos = 2  # 2 segundos entre correos individuales
 
                 for i, alumno in enumerate(alumnos):
-                    status_text.text(f"Enviando a {alumno['nombre']} ({i+1}/{len(alumnos)})...")
+                    status_text.text(f"Enviando a {alumno['nombre']} ({i+1}/{total_alumnos})...")
 
                     # Reiniciar el puntero del archivo para cada envío
                     if archivo:
                         archivo.seek(0)
 
-                    enviar_correo(
+                    if enviar_correo(
                         alumno['email'],
                         asunto,
                         f"Estimado(a) {alumno['nombre']}:\n\n{mensaje_completo}",
                         archivo
-                    )
+                    ):
+                        success_count += 1
 
-                    progress_bar.progress((i + 1) / len(alumnos))
-                    time.sleep(0.5)  # Pausa para evitar bloqueos
+                    progress_bar.progress((i + 1) / total_alumnos)
+                    
+                    # Pausa entre correos individuales
+                    time.sleep(pausa_entre_correos)
+                    
+                    # Pausa más larga entre grupos
+                    if (i + 1) % grupo_size == 0 and (i + 1) < total_alumnos:
+                        status_text.text(f"Pausa de {pausa_entre_grupos} segundos para evitar bloqueos...")
+                        time.sleep(pausa_entre_grupos)
 
-                status_text.success("¡Material enviado con éxito!")
+                if success_count == total_alumnos:
+                    status_text.success(f"¡Material enviado con éxito a todos los {success_count} alumnos!")
+                else:
+                    status_text.warning(f"Se enviaron {success_count} de {total_alumnos} correos. Algunos pueden no haberse enviado correctamente.")
+                
                 st.balloons()
                 st.snow()
 
@@ -516,4 +642,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
