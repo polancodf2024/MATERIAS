@@ -33,7 +33,7 @@ class Config:
             'PASSWORD': st.secrets["remote_password"],
             'PORT': st.secrets["remote_port"],
             'DIR': st.secrets["remote_dir"],
-            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones3"]
+            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones"]
         }
         
         # Configuración para envío de correos (usando los nombres correctos de tus secrets)
@@ -362,6 +362,7 @@ class EmailManager:
         Envía un correo con los resultados de la evaluación al estudiante
         """
         if not CONFIG.EMAIL_CONFIGURED:
+            st.warning("⚠️ Configuración de correo no disponible - no se enviará correo")
             return False
             
         try:
@@ -369,7 +370,7 @@ class EmailManager:
             mensaje = MIMEMultipart()
             mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
             mensaje['To'] = destinatario
-            mensaje['Subject'] = f"📊 Resultados de Evaluación - DeepSeek Week 1 - {nombre_estudiante}"
+            mensaje['Subject'] = f"📊 Resultados de Evaluación - Semana 3 - {nombre_estudiante}"
             
             # Crear contenido del correo
             cuerpo = f"""
@@ -430,12 +431,12 @@ class EmailManager:
                         <ul>
                             <li>Este correo es una confirmación de que tu evaluación ha sido registrada en el sistema.</li>
                             <li>Guarda este correo como comprobante de tu participación.</li>
-                            <li>Para cualquier duda o aclaración, contacta al administrador: {CONFIG.EMAIL['ADMIN_EMAIL']}</li>
+                            <li>Para cualquier duda o aclaración, contacta al administrador.</li>
                         </ul>
                     </div>
                     
                     <div style="margin-top: 20px; text-align: center; color: #7f8c8d; font-size: 12px;">
-                        <p>Sistema Académico de Evaluación - DeepSeek Week 1<br>
+                        <p>Sistema Académico de Evaluación - Semana 3<br>
                         Universidad Nacional Autónoma de México</p>
                     </div>
                 </div>
@@ -447,61 +448,26 @@ class EmailManager:
             mensaje.attach(MIMEText(cuerpo, 'html'))
             
             # Conectar al servidor SMTP y enviar
-            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
-                server.starttls()  # Seguridad TLS
-                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
-                server.send_message(mensaje)
+            server = smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT'])
+            server.starttls()  # Seguridad TLS
+            server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
+            server.send_message(mensaje)
+            server.quit()
             
+            st.success(f"✅ Correo enviado exitosamente a: {destinatario}")
             return True
             
-        except Exception as e:
-            st.error(f"Error al enviar correo: {str(e)}")
+        except smtplib.SMTPAuthenticationError:
+            st.error("❌ Error de autenticación en el servidor de correo. Verifica usuario y contraseña.")
             return False
-
-    @staticmethod
-    def enviar_correo_administrador(nombre_estudiante: str, numero_economico: str, 
-                                  calificacion: int, email_estudiante: str) -> bool:
-        """
-        Envía un correo de notificación al administrador
-        """
-        if not CONFIG.EMAIL_CONFIGURED:
+        except smtplib.SMTPConnectError:
+            st.error("❌ Error de conexión al servidor SMTP. Verifica la configuración del servidor.")
             return False
-            
-        try:
-            mensaje = MIMEMultipart()
-            mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
-            mensaje['To'] = CONFIG.EMAIL['ADMIN_EMAIL']
-            mensaje['Subject'] = f"📋 Nueva Evaluación Registrada - {nombre_estudiante}"
-            
-            cuerpo = f"""
-            <html>
-            <body>
-                <h2>Nueva Evaluación Registrada en el Sistema</h2>
-                
-                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
-                    <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
-                    <p><strong>Número Económico:</strong> {numero_economico}</p>
-                    <p><strong>Email del estudiante:</strong> {email_estudiante}</p>
-                    <p><strong>Calificación:</strong> {calificacion}/5</p>
-                    <p><strong>Fecha y Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
-                </div>
-                
-                <p>Los datos han sido guardados en el archivo central de calificaciones.</p>
-            </body>
-            </html>
-            """
-            
-            mensaje.attach(MIMEText(cuerpo, 'html'))
-            
-            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
-                server.starttls()
-                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
-                server.send_message(mensaje)
-            
-            return True
-            
+        except smtplib.SMTPException as e:
+            st.error(f"❌ Error SMTP: {str(e)}")
+            return False
         except Exception as e:
-            st.error(f"Error al enviar correo al administrador: {str(e)}")
+            st.error(f"❌ Error inesperado al enviar correo: {str(e)}")
             return False
 
 # ====================
@@ -513,87 +479,104 @@ def inicializar_archivo_calificaciones() -> bool:
     csv_content = SSHManager.get_remote_file(remote_path)
 
     if csv_content is None:
-        return False  # Error de conexión
+        st.error("❌ Error de conexión al servidor remoto")
+        return False
 
-    if csv_content == "" or not csv_content.startswith("Fecha,Número Económico,Nombre Completo,Email,Calificación"):
+    if csv_content == "" or not csv_content.strip().startswith("Fecha,Número Económico,Nombre Completo,Email,Calificación"):
         # Crear nuevo archivo con encabezados
         nuevo_contenido = "Fecha,Número Económico,Nombre Completo,Email,Calificación\n"
-        return SSHManager.write_remote_file(remote_path, nuevo_contenido)
+        if SSHManager.write_remote_file(remote_path, nuevo_contenido):
+            st.success("✅ Archivo de calificaciones inicializado correctamente")
+            return True
+        else:
+            st.error("❌ Error al crear el archivo de calificaciones")
+            return False
+    
     return True
 
 def guardar_calificacion(numero_economico: str, nombre: str, email: str, calificacion: int) -> bool:
     """Guarda la calificación en el archivo CSV remoto con lock"""
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    nuevo_registro = f"{fecha},{numero_economico},{nombre},{email},{calificacion}\n"
+    # Usar comillas para evitar problemas con comas en los nombres
+    nuevo_registro = f'"{fecha}","{numero_economico}","{nombre}","{email}",{calificacion}\n'
 
     remote_path = os.path.join(CONFIG.REMOTE['DIR'], CONFIG.REMOTE['CALIFICACIONES_FILE'])
     csv_content = SSHManager.get_remote_file(remote_path)
 
     if csv_content is None:
+        st.error("❌ Error: No se pudo acceder al archivo remoto de calificaciones")
         return False
 
-    # Asegurar que el contenido termina con nueva línea
-    if csv_content and not csv_content.endswith('\n'):
-        csv_content += '\n'
+    # Si el archivo está vacío o solo tiene encabezados, empezar desde cero
+    if not csv_content.strip():
+        nuevo_contenido = "Fecha,Número Económico,Nombre Completo,Email,Calificación\n" + nuevo_registro
+    else:
+        # Asegurar que el contenido termina con nueva línea
+        if not csv_content.endswith('\n'):
+            csv_content += '\n'
+        nuevo_contenido = csv_content + nuevo_registro
 
-    nuevo_contenido = csv_content + nuevo_registro
-    return SSHManager.write_remote_file(remote_path, nuevo_contenido)
-
-
+    # Escribir el archivo actualizado
+    if SSHManager.write_remote_file(remote_path, nuevo_contenido):
+        st.success("✅ Calificación guardada correctamente en el sistema")
+        return True
+    else:
+        st.error("❌ Error al guardar la calificación en el archivo remoto")
+        return False
 
 # ====================
 # PREGUNTAS DEL EXAMEN
 # ====================
 preguntas = [
     {
-        "pregunta": "1. Un usuario necesita redactar un oficio dirigido a la Dirección General. ¿Cuál de las siguientes opciones es la más específica y efectiva para obtener un resultado útil con DeepSeek?",
+        "pregunta": "1. ¿Cuál es el objetivo principal de utilizar DeepSeek en la gestión administrativa según el documento?",
         "opciones": [
-            "Haz un oficio.",
-            "Redacta un oficio formal dirigido a la Dirección General solicitando autorización para el uso del auditorio el próximo 15 de noviembre para una sesión académica, con una asistencia estimada de 50 personas.",
-            "Necesito un documento para pedir permiso.",
-            "Escribe algo para el auditorio."
+            "Reemplazar completamente a los trabajadores humanos",
+            "Automatizar tareas repetitivas y optimizar procesos documentales",
+            "Crear documentos legales sin supervisión humana",
+            "Eliminar la necesidad de revisar documentos"
         ],
-        "respuesta_correcta": "Redacta un oficio formal dirigido a la Dirección General solicitando autorización para el uso del auditorio el próximo 15 de noviembre para una sesión académica, con una asistencia estimada de 50 personas."
+        "respuesta_correcta": "Automatizar tareas repetitivas y optimizar procesos documentales"
     },
     {
-        "pregunta": "2. Si un usuario desea traducir un protocolo de investigación del inglés al español manteniendo la terminología médica especializada, ¿cuál es la forma más adecuada de pedirlo?",
+        "pregunta": "2. Según las mejores prácticas, ¿cuál es la forma correcta de solicitar la redacción de un documento?",
         "opciones": [
-            "Traduce esto.",
-            "Traduce este texto al español.",
-            "Traduce este protocolo de investigación del inglés al español manteniendo la terminología cardiológica específica y el formato técnico.",
-            "Pon esto en español."
+            "Hazme un documento",
+            "Redacta un memorándum para el personal administrativo informando sobre el nuevo procedimiento para solicitud de vacaciones, incluyendo plazos, formato requerido y persona responsable",
+            "Necesito un memo para vacaciones",
+            "Escribe algo sobre vacaciones para el personal"
         ],
-        "respuesta_correcta": "Traduce este protocolo de investigación del inglés al español manteniendo la terminología cardiológica específica y el formato técnico."
+        "respuesta_correcta": "Redacta un memorándum para el personal administrativo informando sobre el nuevo procedimiento para solicitud de vacaciones, incluyendo plazos, formato requerido y persona responsable"
     },
     {
-        "pregunta": "3. Para organizar y resumir un acta de reunión, ¿cuál de las siguientes solicitudes permitirá obtener un resultado más estructurado y útil?",
+        "pregunta": "3. ¿Qué beneficio específico se menciona en el documento sobre el uso de DeepSeek para la gestión documental?",
         "opciones": [
-            "Lee esto y dime qué dice.",
-            "Resume esta acta de reunión.",
-            "Toma esta transcripción de reunión y genera un acta formal con los siguientes apartados: puntos tratados, acuerdos alcanzados, acciones pendientes con responsables, y temas para la próxima reunión.",
-            "Saca lo importante de esta reunión."
+            "Elimina completamente los errores humanos",
+            "Reduce el tiempo en redacción de documentos en un 60-70%",
+            "Permite trabajar sin conexión a internet",
+            "Genera automáticamente documentos legales vinculantes"
         ],
-        "respuesta_correcta": "Toma esta transcripción de reunión y genera un acta formal con los siguientes apartados: puntos tratados, acuerdos alcanzados, acciones pendientes con responsables, y temas para la próxima reunión."
+        "respuesta_correcta": "Reduce el tiempo en redacción de documentos en un 60-70%"
     },
     {
-        "pregunta": "4. Si un usuario quiere crear una plantilla para informes mensuales de actividades, ¿cuál es la mejor manera de solicitarlo?",
+        "pregunta": "4. Para organizar actas de reuniones, ¿qué estructura se recomienda solicitar a DeepSeek?",
         "opciones": [
-            "Haz un formato.",
-            "Crea una plantilla para informes mensuales de actividades que incluya: título del proyecto, investigadores responsables, período reportado, actividades realizadas, resultados obtenidos, dificultades enfrentadas y próximos pasos.",
-            "Necesito un modelo para informes.",
-            "Diseña algo para reportar avances."
+            "Un resumen general de lo hablado",
+            "Los puntos más importantes solamente",
+            "Puntos tratados, acuerdos alcanzados, acciones pendientes con responsables, y temas para la próxima reunión",
+            "Una transcripción completa de la conversación"
         ],
-        "respuesta_correcta": "Crea una plantilla para informes mensuales de actividades que incluya: título del proyecto, investigadores responsables, período reportado, actividades realizadas, resultados obtenidos, dificultades enfrentadas y próximos pasos."
+        "respuesta_correcta": "Puntos tratados, acuerdos alcanzados, acciones pendientes con responsables, y temas para la próxima reunión"
     },
     {
-        "pregunta": "5. Al clasificar documentos automáticamente, ¿cuál de estas instrucciones será más efectiva para DeepSeek?",
+        "pregunta": "5. ¿Qué se recomienda hacer siempre con los documentos generados por DeepSeek antes de utilizarlos?",
         "opciones": [
-            "Ordena estos documentos.",
-            "Clasifica estos 20 documentos en las categorías: Investigación, Administrativo, Pacientes, Proveedores. Para cada uno, indica el tipo de documento y su nivel de prioridad.",
-            "Separa estos papeles.",
-            "Agrupa estos archivos."
+            "Guardarlos automáticamente sin revisar",
+            "Compartirlos inmediatamente con todo el personal",
+            "Revisarlos y personalizarlos con información específica del área",
+            "Convertirlos a PDF inmediatamente"
         ],
-        "respuesta_correcta": "Clasifica estos 20 documentos en las categorías: Investigación, Administrativo, Pacientes, Proveedores. Para cada uno, indica el tipo de documento y su nivel de prioridad."
+        "respuesta_correcta": "Revisarlos y personalizarlos con información específica del área"
     }
 ]
 
@@ -672,7 +655,7 @@ def show_student_info_form():
 
 def show_exam_interface():
     """Muestra la interfaz del examen"""
-    st.header("Examen: Cómo Formular Preguntas a DeepSeek")
+    st.header("Examen: DeepSeek para Gestión Administrativa y Documental")
     st.write("Responde las siguientes 5 preguntas seleccionando la opción correcta:")
     
     # Usar tabs para organizar las preguntas
@@ -740,7 +723,7 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
     # Envío de correos (solo si está configurado)
     if CONFIG.EMAIL_CONFIGURED:
         with st.spinner("Enviando resultados por correo..."):
-            # Enviar correo al estudiante
+            # Enviar correo al estudiante SOLAMENTE
             correo_enviado = EmailManager.enviar_correo_resultados(
                 destinatario=st.session_state.email,
                 nombre_estudiante=st.session_state.nombre_completo,
@@ -749,21 +732,8 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
                 respuestas_detalladas=respuestas_para_correo
             )
             
-            # Enviar notificación al administrador
-            notificacion_enviada = EmailManager.enviar_correo_administrador(
-                nombre_estudiante=st.session_state.nombre_completo,
-                numero_economico=st.session_state.numero_economico,
-                calificacion=calificacion,
-                email_estudiante=st.session_state.email
-            )
-            
-            if correo_enviado:
-                st.success(f"📧 Se ha enviado un correo con tus resultados a: {st.session_state.email}")
-            else:
+            if not correo_enviado:
                 st.warning("⚠️ No se pudo enviar el correo con los resultados, pero tu evaluación ha sido guardada.")
-                
-            if notificacion_enviada:
-                st.info("📋 Se ha notificado al administrador sobre tu evaluación.")
     else:
         st.info("ℹ️ La funcionalidad de correo no está configurada. Tu evaluación ha sido guardada correctamente.")
 
@@ -878,19 +848,20 @@ def main():
         
         with col2:
             if st.button("Enviar Examen", type="primary", disabled=not all_answered):
-                # Calificar examen
-                calificacion, respuestas_correctas = calculate_grade()
-                
-                # Guardar calificación
-                if guardar_calificacion(
-                    st.session_state.numero_economico,
-                    st.session_state.nombre_completo,
-                    st.session_state.email,
-                    calificacion
-                ):
-                    show_results(calificacion, respuestas_correctas)
-                else:
-                    st.error("Error al guardar la calificación. Contacta al administrador: polanco@unam.mx.")
+                with st.spinner("Calificando examen..."):
+                    # Calificar examen
+                    calificacion, respuestas_correctas = calculate_grade()
+                    
+                    # Guardar calificación
+                    if guardar_calificacion(
+                        st.session_state.numero_economico,
+                        st.session_state.nombre_completo,
+                        st.session_state.email,
+                        calificacion
+                    ):
+                        show_results(calificacion, respuestas_correctas)
+                    else:
+                        st.error("Error al guardar la calificación. Contacta al administrador: polanco@unam.mx.")
 
 # Manejo de limpieza al finalizar
 try:
