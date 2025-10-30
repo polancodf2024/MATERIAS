@@ -33,7 +33,7 @@ class Config:
             'PASSWORD': st.secrets["remote_password"],
             'PORT': st.secrets["remote_port"],
             'DIR': st.secrets["remote_dir"],
-            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones1"]
+            'CALIFICACIONES_FILE': st.secrets["remote_calificaciones"]
         }
         
         # Configuración para envío de correos (usando los nombres correctos de tus secrets)
@@ -369,7 +369,7 @@ class EmailManager:
             mensaje = MIMEMultipart()
             mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
             mensaje['To'] = destinatario
-            mensaje['Subject'] = f"📊 Resultados de Evaluación - DeepSeek Week 1 - {nombre_estudiante}"
+            mensaje['Subject'] = f"📊 Resultados de Evaluación - Semana 1 - {nombre_estudiante}"
             
             # Crear contenido del correo
             cuerpo = f"""
@@ -452,52 +452,6 @@ class EmailManager:
             
         except Exception as e:
             st.error(f"Error al enviar correo: {str(e)}")
-            return False
-
-    @staticmethod
-    def enviar_correo_administrador(nombre_estudiante: str, numero_economico: str, 
-                                  calificacion: int, email_estudiante: str) -> bool:
-        """
-        Envía un correo de notificación al administrador
-        """
-        if not CONFIG.EMAIL_CONFIGURED:
-            return False
-            
-        try:
-            mensaje = MIMEMultipart()
-            mensaje['From'] = CONFIG.EMAIL['SENDER_EMAIL']
-            mensaje['To'] = CONFIG.EMAIL['ADMIN_EMAIL']
-            mensaje['Subject'] = f"📋 Nueva Evaluación Registrada - {nombre_estudiante}"
-            
-            cuerpo = f"""
-            <html>
-            <body>
-                <h2>Nueva Evaluación Registrada en el Sistema</h2>
-                
-                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
-                    <p><strong>Estudiante:</strong> {nombre_estudiante}</p>
-                    <p><strong>Número Económico:</strong> {numero_economico}</p>
-                    <p><strong>Email del estudiante:</strong> {email_estudiante}</p>
-                    <p><strong>Calificación:</strong> {calificacion}/5</p>
-                    <p><strong>Fecha y Hora:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
-                </div>
-                
-                <p>Los datos han sido guardados en el archivo central de calificaciones.</p>
-            </body>
-            </html>
-            """
-            
-            mensaje.attach(MIMEText(cuerpo, 'html'))
-            
-            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
-                server.starttls()
-                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
-                server.send_message(mensaje)
-            
-            return True
-            
-        except Exception as e:
-            st.error(f"Error al enviar correo al administrador: {str(e)}")
             return False
 
 # ====================
@@ -745,21 +699,10 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
                 respuestas_detalladas=respuestas_para_correo
             )
             
-            # Enviar notificación al administrador
-            notificacion_enviada = EmailManager.enviar_correo_administrador(
-                nombre_estudiante=st.session_state.nombre_completo,
-                numero_economico=st.session_state.numero_economico,
-                calificacion=calificacion,
-                email_estudiante=st.session_state.email
-            )
-            
             if correo_enviado:
                 st.success(f"📧 Se ha enviado un correo con tus resultados a: {st.session_state.email}")
             else:
                 st.warning("⚠️ No se pudo enviar el correo con los resultados, pero tu evaluación ha sido guardada.")
-                
-            if notificacion_enviada:
-                st.info("📋 Se ha notificado al administrador sobre tu evaluación.")
     else:
         st.info("ℹ️ La funcionalidad de correo no está configurada. Tu evaluación ha sido guardada correctamente.")
 
