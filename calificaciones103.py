@@ -436,8 +436,8 @@ class EmailManager:
                     </div>
                     
                     <div style="margin-top: 20px; text-align: center; color: #7f8c8d; font-size: 12px;">
-                        <p>Sistema Académico de Evaluación - Semana 3<br>
-                        Universidad Nacional Autónoma de México</p>
+                        <p>Sistema Académico de Evaluación<br>
+                        Instituto Nacional de Cardiología Ignacio Chávez</p>
                     </div>
                 </div>
             </body>
