@@ -362,6 +362,7 @@ class EmailManager:
         Envía un correo con los resultados de la evaluación al estudiante
         """
         if not CONFIG.EMAIL_CONFIGURED:
+            st.warning("⚠️ Configuración de correo no disponible - no se enviará correo")
             return False
             
         try:
@@ -371,7 +372,6 @@ class EmailManager:
             mensaje['To'] = destinatario
             mensaje['Subject'] = f"📊 Resultados de Evaluación - Semana 4 - {nombre_estudiante}"
 
-            
             # Crear contenido del correo
             cuerpo = f"""
             <html>
@@ -448,15 +448,26 @@ class EmailManager:
             mensaje.attach(MIMEText(cuerpo, 'html'))
             
             # Conectar al servidor SMTP y enviar
-            with smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT']) as server:
-                server.starttls()  # Seguridad TLS
-                server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
-                server.send_message(mensaje)
+            server = smtplib.SMTP(CONFIG.EMAIL['SMTP_SERVER'], CONFIG.EMAIL['SMTP_PORT'])
+            server.starttls()  # Seguridad TLS
+            server.login(CONFIG.EMAIL['SENDER_EMAIL'], CONFIG.EMAIL['SENDER_PASSWORD'])
+            server.send_message(mensaje)
+            server.quit()
             
+            st.success(f"✅ Correo enviado exitosamente a: {destinatario}")
             return True
             
+        except smtplib.SMTPAuthenticationError:
+            st.error("❌ Error de autenticación en el servidor de correo. Verifica usuario y contraseña.")
+            return False
+        except smtplib.SMTPConnectError:
+            st.error("❌ Error de conexión al servidor SMTP. Verifica la configuración del servidor.")
+            return False
+        except smtplib.SMTPException as e:
+            st.error(f"❌ Error SMTP: {str(e)}")
+            return False
         except Exception as e:
-            st.error(f"Error al enviar correo: {str(e)}")
+            st.error(f"❌ Error inesperado al enviar correo: {str(e)}")
             return False
 
 # ====================
@@ -714,9 +725,7 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
                 respuestas_detalladas=respuestas_para_correo
             )
             
-            if correo_enviado:
-                st.success(f"📧 Se ha enviado un correo con tus resultados a: {st.session_state.email}")
-            else:
+            if not correo_enviado:
                 st.warning("⚠️ No se pudo enviar el correo con los resultados, pero tu evaluación ha sido guardada.")
     else:
         st.info("ℹ️ La funcionalidad de correo no está configurada. Tu evaluación ha sido guardada correctamente.")
