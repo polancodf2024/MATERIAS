@@ -570,7 +570,7 @@ def validate_student_id(student_id: str) -> bool:
     """Valida que el número económico tenga un formato básico"""
     if not student_id:
         return False
-    return bool(re.match(r'^[a-zA-Z0-9]{5,}$', student_id.strip()))
+    return bool(re.match(r'^[a-zA-Z0-9]{4,}$', student_id.strip()))
 
 # ====================
 # COMPONENTES DE INTERFAZ
