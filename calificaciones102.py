@@ -469,7 +469,8 @@ def guardar_calificacion(numero_economico: str, nombre: str, email: str, calific
     """Guarda la calificación en el archivo CSV remoto con lock"""
     fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nombre_limpio = nombre.replace(',', ';')
-    nuevo_registro = f'"{fecha}","{numero_economico}","{nombre_limpio}","{email}","{calificacion}"\n'
+    nuevo_registro = f"{fecha},{numero_economico},{nombre_limpio},{email},{calificacion}\n"
+
 
     remote_path = os.path.join(CONFIG.REMOTE['DIR'], CONFIG.REMOTE['CALIFICACIONES_FILE'])
     
