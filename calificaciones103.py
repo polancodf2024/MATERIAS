@@ -529,7 +529,7 @@ def guardar_calificacion(numero_economico: str, nombre: str, email: str, calific
 # ====================
 preguntas = [
     {
-        "pregunta": "1. ¿Cuál es el objetivo principal de utilizar DeepSeek en la gestión administrativa según el documento?",
+        "pregunta": "1. ¿Cuál es el objetivo principal de utilizar DeepSeek en la gestión administrativa según el video?",
         "opciones": [
             "Reemplazar completamente a los trabajadores humanos",
             "Automatizar tareas repetitivas y optimizar procesos documentales",
@@ -549,7 +549,7 @@ preguntas = [
         "respuesta_correcta": "Redacta un memorándum para el personal administrativo informando sobre el nuevo procedimiento para solicitud de vacaciones, incluyendo plazos, formato requerido y persona responsable"
     },
     {
-        "pregunta": "3. ¿Qué beneficio específico se menciona en el documento sobre el uso de DeepSeek para la gestión documental?",
+        "pregunta": "3. ¿Qué beneficio específico se menciona en el video sobre el uso de DeepSeek para la gestión documental?",
         "opciones": [
             "Elimina completamente los errores humanos",
             "Reduce el tiempo en redacción de documentos en un 60-70%",
