@@ -288,30 +288,24 @@ def main():
     Este programa procesa automáticamente las referencias bibliográficas en documentos Word, 
     manteniendo el formato original del documento.
     
-    **Nuevas funcionalidades:**
+    **Funcionalidades:**
     - ✅ **Referencias múltiples**: Soporte para `[[ref1 && ref2]]` → `[1, 2]`
     - ✅ **Listas con comas**: `[[ref1 && ref2 && ref3]]` → `[1, 2, 3]` (sin rangos)
     - ✅ **Procesamiento secuencial**: Las referencias se numeran en el orden exacto de aparición
     - ✅ **Conversión de rangos**: Los rangos existentes como `[1-3]` se convierten a `[1, 2, 3]`
     """)
     
-    # SELECTOR DE MODO DE PROCESAMIENTO
+    # SELECTOR DE MODO DE PROCESAMIENTO - SOLO UN MODO DISPONIBLE
     st.subheader("🔧 Configuración de Procesamiento")
-    process_mode = st.radio(
-        "Selecciona el tipo de referencias a procesar:",
-        [
-            "Referencias en formato [[texto]] → [número]",
-            "Referencias numéricas existentes [1], [2]",
-            "Ambos formatos"
-        ],
-        index=1  # Por defecto selecciona referencias numéricas
-    )
+    
+    # Solo mostramos el modo de referencias en formato [[texto]]
+    process_mode = "Referencias en formato [[texto]] → [número]"
+    
+    st.info(f"**Modo seleccionado:** {process_mode}")
     
     # Mapear selección a modo de procesamiento
     mode_map = {
-        "Referencias en formato [[texto]] → [número]": "brackets",
-        "Referencias numéricas existentes [1], [2]": "numeric", 
-        "Ambos formatos": "both"
+        "Referencias en formato [[texto]] → [número]": "brackets"
     }
     
     # EJEMPLOS
@@ -361,6 +355,16 @@ def main():
                 help="Haz clic para procesar las referencias del documento"
             )
         
+        # Inicializar variables de sesión si no existen
+        if 'processed_doc' not in st.session_state:
+            st.session_state.processed_doc = None
+        if 'stats' not in st.session_state:
+            st.session_state.stats = None
+        if 'output_buffer' not in st.session_state:
+            st.session_state.output_buffer = None
+        if 'text_content' not in st.session_state:
+            st.session_state.text_content = None
+        
         if process_btn:
             # Procesar documento
             processor = DOCXReferenceProcessor()
@@ -375,69 +379,78 @@ def main():
                 # Obtener estadísticas
                 stats = processor.get_statistics()
                 
-                with col2:
-                    st.subheader("📊 Estadísticas de procesamiento")
-                    st.metric("Referencias encontradas", stats['total_references'])
-                    
-                    if stats['total_references'] > 0:
-                        st.success("✅ Referencias procesadas exitosamente!")
-                        # Mostrar preview de referencias
-                        st.subheader("🔍 Referencias detectadas")
-                        
-                        with st.expander("Ver lista completa de referencias"):
-                            for i, ref in enumerate(stats['references_found'], 1):
-                                st.write(f"**[{i}]** {ref}")
-                    else:
-                        st.warning("⚠️ No se encontraron referencias en el documento")
-                
                 # Preparar archivo para descarga
                 output_buffer = BytesIO()
                 processed_doc.save(output_buffer)
                 output_buffer.seek(0)
                 
-                # Botones de descarga
-                st.subheader("💾 Descargar documento procesado")
+                # Preparar contenido de texto para referencia
+                text_content = "Documento procesado con referencias numeradas\n\n"
+                text_content += f"Total de referencias: {stats['total_references']}\n\n"
                 
-                col_d1, col_d2 = st.columns(2)
+                for i, ref in enumerate(stats['references_found'], 1):
+                    text_content += f"{i}. {ref}\n"
                 
-                with col_d1:
-                    st.download_button(
-                        label="📥 Descargar DOCX procesado",
-                        data=output_buffer.getvalue(),
-                        file_name=f"procesado_{uploaded_file.name}",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-                
-                with col_d2:
-                    # También ofrecer versión texto para referencia
-                    text_content = "Documento procesado con referencias numeradas\n\n"
-                    text_content += f"Total de referencias: {stats['total_references']}\n\n"
-                    
-                    for i, ref in enumerate(stats['references_found'], 1):
-                        text_content += f"{i}. {ref}\n"
-                    
-                    st.download_button(
-                        label="📄 Descargar lista de referencias (TXT)",
-                        data=text_content,
-                        file_name="referencias_procesadas.txt",
-                        mime="text/plain"
-                    )
-                
-                # Mostrar información adicional
-                st.info("""
-                **Nota:** El documento descargado mantiene todo el formato original de Word, 
-                con las referencias convertidas a numeración consistente y una sección 
-                REFERENCES agregada al final.
-                
-                **Mejora importante:** 
-                - Las referencias se numeran en el orden exacto de aparición en el documento
-                - Se procesan párrafos y tablas según van apareciendo, no por lotes separados
-                - Todas las referencias múltiples se muestran como listas con comas: `[1, 2, 3]`
-                """)
+                # Guardar en session state
+                st.session_state.processed_doc = processed_doc
+                st.session_state.stats = stats
+                st.session_state.output_buffer = output_buffer
+                st.session_state.text_content = text_content
+        
+        # Mostrar resultados si existen en session state
+        if st.session_state.stats is not None:
+            stats = st.session_state.stats
             
-            else:
-                st.error("❌ Error al procesar el documento. Por favor, verifica que el archivo sea válido.")
-        else:
+            with col2:
+                st.subheader("📊 Estadísticas de procesamiento")
+                st.metric("Referencias encontradas", stats['total_references'])
+                
+                if stats['total_references'] > 0:
+                    st.success("✅ Referencias procesadas exitosamente!")
+                    # Mostrar preview de referencias
+                    st.subheader("🔍 Referencias detectadas")
+                    
+                    with st.expander("Ver lista completa de referencias"):
+                        for i, ref in enumerate(stats['references_found'], 1):
+                            st.write(f"**[{i}]** {ref}")
+                else:
+                    st.warning("⚠️ No se encontraron referencias en el documento")
+            
+            # Botones de descarga (siempre visibles una vez procesado)
+            st.subheader("💾 Descargar documento procesado")
+            
+            col_d1, col_d2 = st.columns(2)
+            
+            with col_d1:
+                st.download_button(
+                    label="📥 Descargar DOCX procesado",
+                    data=st.session_state.output_buffer.getvalue() if st.session_state.output_buffer else "",
+                    file_name=f"procesado_{uploaded_file.name}",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="download_docx"
+                )
+            
+            with col_d2:
+                st.download_button(
+                    label="📄 Descargar lista de referencias (TXT)",
+                    data=st.session_state.text_content if st.session_state.text_content else "",
+                    file_name="referencias_procesadas.txt",
+                    mime="text/plain",
+                    key="download_txt"
+                )
+            
+            # Mostrar información adicional
+            st.info("""
+            **Nota:** El documento descargado mantiene todo el formato original de Word, 
+            con las referencias convertidas a numeración consistente y una sección 
+            REFERENCES agregada al final.
+            
+            **Mejora importante:** 
+            - Las referencias se numeran en el orden exacto de aparición en el documento
+            - Todas las referencias múltiples se muestran como listas con comas: `[1, 2, 3]`
+            """)
+        
+        elif not process_btn:
             st.info("👆 **Haz clic en el botón 'PROCESAR REFERENCIAS' para comenzar**")
 
 if __name__ == "__main__":
