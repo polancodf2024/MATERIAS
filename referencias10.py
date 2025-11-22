@@ -6,6 +6,8 @@ import docx
 from io import BytesIO
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+import base64
+from PIL import Image
 
 class ReferenceProcessor:
     def __init__(self):
@@ -275,24 +277,66 @@ class DOCXReferenceProcessor:
             'reference_map': self.ref_processor.reference_map
         }
 
+# Función para cargar y redimensionar el logo
+def load_and_resize_logo(scale_factor=0.10):
+    """Carga y redimensiona el logo del Instituto Nacional de Cardiología"""
+    try:
+        # Cargar la imagen del logo
+        logo = Image.open("escudo_COLOR.jpg")
+        original_width, original_height = logo.size
+        
+        # Calcular nuevas dimensiones con factor fijo de 0.10
+        new_width = int(original_width * scale_factor)
+        new_height = int(original_height * scale_factor)
+        
+        # Redimensionar el logo
+        resized_logo = logo.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        return resized_logo, original_width, original_height
+        
+    except FileNotFoundError:
+        st.warning("⚠️ No se encontró el archivo 'escudo_COLOR.jpg'. Asegúrate de que esté en el mismo directorio que el script.")
+        return None, None, None
+    except Exception as e:
+        st.error(f"Error al cargar el logo: {e}")
+        return None, None, None
+
 # INTERFAZ STREAMLIT MEJORADA
 def main():
     st.set_page_config(
-        page_title="Procesador de Referencias DOCX", 
+        page_title="Procesador de Referencias DOCX - INC", 
         page_icon="📚", 
         layout="wide"
     )
     
-    st.title("📚 Procesador de Referencias para Documentos DOCX")
-    st.markdown("""
-    Este programa procesa automáticamente las referencias bibliográficas en documentos Word, 
-    manteniendo el formato original del documento.
+    # Cargar y redimensionar el logo con factor fijo de 0.10
+    logo, original_width, original_height = load_and_resize_logo(scale_factor=0.10)
     
-    **Funcionalidades:**
-    - ✅ **Referencia simple**:  `[[ref1]]` → `[1]`
-    - ✅ **Referencias múltiples**: `[[ref1 && ref2 && ref3]]` → `[1, 2, 3]` (sin rangos)
-    - ✅ **Procesamiento secuencial**: Las referencias se numeran en el orden exacto de aparición
-    """)
+    # Contenido principal - SIN columna izquierda
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Mostrar logo centrado en la parte superior
+        if logo:
+            st.image(logo, use_container_width=False)  # CORREGIDO: use_column_width → use_container_width
+            # Mostrar el lema debajo del logo
+            #st.markdown("""
+            #<div style='text-align: center; font-style: italic; color: #666; margin-top: -10px; margin-bottom: 20px;'>
+            #AMOR:SCIENTIA:OVE:INSERVIANT:CORDI<br>
+            #INSTITUTO NACIONAL DE CARDIOLOGÍA IGNACIO CHÁVEZ
+            #</div>
+            #""", unsafe_allow_html=True)
+        
+        st.title("📚 Procesador de Referencias para Documentos DOCX")
+        st.markdown("""
+        Este programa procesa automáticamente las referencias bibliográficas en documentos Word, 
+        manteniendo el formato original del documento.
+        
+        **Funcionalidades:**
+        - ✅ **Referencia simple**:  `[[ref1]]` → `[1]`
+        - ✅ **Referencias múltiples**: `[[ref1 && ref2 && ref3]]` → `[1, 2, 3]` (sin rangos)
+        - ✅ **Procesamiento secuencial**: Las referencias se numeran en el orden exacto de aparición
+        """)
     
     # SELECTOR DE MODO DE PROCESAMIENTO - SOLO UN MODO DISPONIBLE
     st.subheader("🔧 Configuración de Procesamiento")
@@ -313,6 +357,10 @@ def main():
         **Delimitadores soportados:**
         - `[[Ref1]]` para encerrar las referencias
         - `&&` para separar múltiples referencias
+        
+        **Ejemplos:**
+        - `[[Referencia simple]]` → `[1]`
+        - `[[Ref1 && Ref2 && Ref3]]` → `[1, 2, 3]`
         """)
     
     uploaded_file = st.file_uploader("Sube tu archivo DOCX", type=['docx'])
