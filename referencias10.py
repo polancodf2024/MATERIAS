@@ -283,16 +283,15 @@ def main():
         layout="wide"
     )
     
-    st.title("📚 Procesador de Referencias en Documentos DOCX")
+    st.title("📚 Procesador de Referencias para Documentos DOCX")
     st.markdown("""
     Este programa procesa automáticamente las referencias bibliográficas en documentos Word, 
     manteniendo el formato original del documento.
     
     **Funcionalidades:**
-    - ✅ **Referencias múltiples**: Soporte para `[[ref1 && ref2]]` → `[1, 2]`
-    - ✅ **Listas con comas**: `[[ref1 && ref2 && ref3]]` → `[1, 2, 3]` (sin rangos)
+    - ✅ **Referencia simple**:  `[[ref1]]` → `[1]`
+    - ✅ **Referencias múltiples**: `[[ref1 && ref2 && ref3]]` → `[1, 2, 3]` (sin rangos)
     - ✅ **Procesamiento secuencial**: Las referencias se numeran en el orden exacto de aparición
-    - ✅ **Conversión de rangos**: Los rangos existentes como `[1-3]` se convierten a `[1, 2, 3]`
     """)
     
     # SELECTOR DE MODO DE PROCESAMIENTO - SOLO UN MODO DISPONIBLE
@@ -311,19 +310,9 @@ def main():
     # EJEMPLOS
     with st.expander("📖 Ver ejemplos de formato"):
         st.markdown("""
-        **Ejemplos de entrada y salida:**
-        - `[[Referencia simple]]` → `[1]`
-        - `[[Ref1 && Ref2 && Ref3]]` → `[1, 2, 3]`
-        - `[1-3]` → `[1, 2, 3]`
-        - `[1,2,3,6,7,8,9]` → `[1, 2, 3, 6, 7, 8, 9]`
-        - `[[Ackermann et al. 2024 && Pranclova et al. 2024]]` → `[4, 5]`
-        
         **Delimitadores soportados:**
+        - `[[Ref1]]` para encerrar las referencias
         - `&&` para separar múltiples referencias
-        - `,` para separar números en listas
-        
-        **Nota importante:** Las referencias ahora se numeran en el orden exacto de aparición en el documento,
-        procesando párrafos y tablas según van apareciendo.
         """)
     
     uploaded_file = st.file_uploader("Sube tu archivo DOCX", type=['docx'])
