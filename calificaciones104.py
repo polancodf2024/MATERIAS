@@ -542,34 +542,34 @@ preguntas = [
         "respuesta_correcta": "Revisión de estudios sobre enfermedades cardiovasculares específicas y evaluación de intervenciones terapéuticas"
     },
     {
-        "pregunta": "3. Según el ejemplo de uso presentado en el documento, ¿qué fármaco mostró una reducción del 21% en el riesgo del resultado primario (muerte cardiovascular u hospitalización) en pacientes con IC-FEP?",
+        "pregunta": "3. Según la guía de buenas prácticas de DeepSeek, ¿cuál es la estrategia recomendada para formular consultas efectivas?",
         "opciones": [
-            "Spironolactona",
-            "Sacubitril-Valsartán",
-            "Empagliflozina",
-            "Irbesartán"
+            "Ser vago para permitir respuestas creativas",
+            "Proporcionar contexto mínimo para respuestas generales",
+            "Ser específico, detallado y proporcionar contexto relevante",
+            "Evitar definir el formato esperado de respuesta"
         ],
-        "respuesta_correcta": "Empagliflozina"
+        "respuesta_correcta": "Ser específico, detallado y proporcionar contexto relevante"
     },
     {
-        "pregunta": "4. ¿Qué plantilla se especializa en análisis bibliométrico y mapeo del panorama investigador para identificar tendencias y gaps de investigación?",
+        "pregunta": "4. En el contexto de aplicaciones administrativas con DeepSeek, ¿qué beneficio principal se obtiene al usar plantillas generadas por la IA?",
         "opciones": [
-            "Investigación Traslacional en Cardiología",
-            "Administración y Gestión en Cardiología",
-            "Organización de Archivos Clínicos",
-            "Análisis Bibliométrico/Tendencias Investigación"
+            "Eliminar completamente la necesidad de personalización humana",
+            "Reducir significativamente el tiempo de redacción de documentos",
+            "Generar contenido 100% perfecto sin necesidad de revisión",
+            "Automatizar completamente los procesos de toma de decisiones"
         ],
-        "respuesta_correcta": "Análisis Bibliométrico/Tendencias Investigación"
+        "respuesta_correcta": "Reducir significativamente el tiempo de redacción de documentos"
     },
     {
-        "pregunta": "5. En el contexto de la plantilla de 'Investigación Traslacional en Cardiología', ¿cuál es su objetivo principal?",
+        "pregunta": "5. Según las buenas prácticas éticas en el uso de DeepSeek para investigación científica, ¿qué acción es fundamental mantener?",
         "opciones": [
-            "Analizar exclusivamente investigación básica en laboratorio",
-            "Conectar el conocimiento básico con la práctica clínica y evaluar implementación de guías",
-            "Gestionar recursos financieros para investigación",
-            "Organizar archivos clínicos históricos"
+            "Utilizar el contenido generado sin atribución alguna",
+            "Compartir información confidencial para obtener respuestas más precisas",
+            "Verificar siempre la información crítica y mantener los estándares de integridad académica",
+            "Depender completamente de la IA para el análisis de datos sin validación"
         ],
-        "respuesta_correcta": "Conectar el conocimiento básico con la práctica clínica y evaluar implementación de guías"
+        "respuesta_correcta": "Verificar siempre la información crítica y mantener los estándares de integridad académica"
     }
 ]
 
