@@ -258,9 +258,20 @@ class DOCXReferenceProcessor:
         # Agregar salto de página
         doc.add_page_break()
         
-        # Título de referencias
+        # Título de referencias - USANDO ESTILO SEGURO
         title_paragraph = doc.add_paragraph("REFERENCES")
-        title_paragraph.style = doc.styles['Heading1']
+        
+        # Aplicar estilo de manera segura
+        try:
+            title_paragraph.style = doc.styles['Heading1']
+        except KeyError:
+            # Si el estilo Heading1 no existe, usar Normal y aplicar formato manual
+            title_paragraph.style = doc.styles['Normal']
+            # Aplicar formato manual para que se vea como título
+            for run in title_paragraph.runs:
+                run.bold = True
+                run.font.size = docx.shared.Pt(16)
+        
         title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Agregar cada referencia
@@ -318,14 +329,7 @@ def main():
     with col1:
         # Mostrar logo centrado en la parte superior
         if logo:
-            st.image(logo, use_container_width=False)  # CORREGIDO: use_column_width → use_container_width
-            # Mostrar el lema debajo del logo
-            #st.markdown("""
-            #<div style='text-align: center; font-style: italic; color: #666; margin-top: -10px; margin-bottom: 20px;'>
-            #AMOR:SCIENTIA:OVE:INSERVIANT:CORDI<br>
-            #INSTITUTO NACIONAL DE CARDIOLOGÍA IGNACIO CHÁVEZ
-            #</div>
-            #""", unsafe_allow_html=True)
+            st.image(logo, use_container_width=False)
         
         st.title("📚 Procesador de Referencias para Documentos DOCX")
         st.markdown("""
