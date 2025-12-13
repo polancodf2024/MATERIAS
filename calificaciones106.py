@@ -648,7 +648,7 @@ def show_student_info_form():
 
 def show_exam_interface():
     """Muestra la interfaz del examen"""
-    st.header("Evaluación de la Semana 6")
+    st.header("Evaluación de la  Semana 6")
     st.write("Responde las siguientes 5 preguntas seleccionando la opción correcta:")
     
     # Usar tabs para organizar las preguntas
@@ -747,7 +747,7 @@ def show_results(calificacion: int, respuestas_correctas: List[str]):
     st.download_button(
         label="📥 Descargar evaluación completa",
         data=csv_data,
-        file_name=f"evaluacion_automatizacion_procesos_{st.session_state.numero_economico}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        file_name=f"evaluacion_redaccion_asistida_{st.session_state.numero_economico}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
         use_container_width=True
     )
