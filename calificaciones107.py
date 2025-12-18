@@ -546,7 +546,7 @@ preguntas = [
         "opciones": [
             "'Generado automáticamente por IA'",
             "'Creado con herramientas de inteligencia artificial bajo supervisión de los autores'",
-            "'El diagram was generated using artificial intelligence tools under the supervision of the authors.'",
+            "'The diagram was generated using artificial intelligence tools under the supervision of the authors.'",
             "'Producido mediante algoritmos de machine learning'"
         ],
         "respuesta_correcta": "'The diagram was generated using artificial intelligence tools under the supervision of the authors.'"
