@@ -43,7 +43,8 @@ class Config:
                 'Análisis Multivariado y Multicategórico': st.secrets["remote_categorico"],
                 'Manejo e Interpretación de Datos': st.secrets["remote_manejo"],
                 'Análisis de Experimentos': st.secrets["remote_diseno"],
-                'Inteligencia Artificial': st.secrets["remote_inteligencia"]
+                'Inteligencia Artificial en Enfermería': st.secrets["remote_inteligencia_enfermeria"],
+                'Inteligencia Artificial en Investigación': st.secrets["remote_inteligencia_investigacion"]
             }
         }
 
@@ -134,7 +135,15 @@ TEMARIOS = {
             'Sistema de evaluación pendiente de definir'
         ]
     },
-    'Inteligencia Artificial': {
+        'Inteligencia Artificial en Enfermería': {
+        'contenido': [
+            'Temario pendiente de subir por el departamento académico'
+        ],
+        'evaluacion': [
+            'Sistema de evaluación pendiente de definir'
+        ]
+    },
+    'Inteligencia Artificial en Investigación': {
         'contenido': [
             'Temario pendiente de subir por el departamento académico'
         ],
